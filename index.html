@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>错题克星 - 赛博工头燕哥</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- MathJax -->
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                processEscapes: true
+            },
+            svg: { fontCache: 'global' }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <!-- FontAwesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- Google Fonts (Only for Logo) -->
+    <link href="https://fonts.googleapis.com/css2?family=Zcool+XiaoWei&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            background-color: #F8FAFC;
+            font-family: "Microsoft YaHei", "Heiti SC", sans-serif;
+            color: #334155;
+        }
+
+        /* -----------------------
+           Special UI for Header 
+           ----------------------- */
+        .header-special {
+            background: linear-gradient(135deg, #312E81 0%, #4C1D95 50%, #581C87 100%);
+            /* Deep Indigo to Purple */
+            border-bottom: 4px solid #F59E0B;
+            /* Gold Border */
+        }
+
+        .logo-text {
+            font-family: 'Zcool XiaoWei', serif;
+            color: #FFF;
+            text-shadow: 0px 4px 10px rgba(0, 0, 0, 0.3);
+            letter-spacing: 2px;
+        }
+
+        .btn-load-more {
+            background: linear-gradient(to right, #4F46E5, #7C3AED);
+            transition: all 0.3s ease;
+        }
+
+        .btn-load-more:hover {
+            transform: scale(1.02);
+            box-shadow: 0 10px 20px -5px rgba(124, 58, 237, 0.4);
+        }
+
+        .card-hover:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        /* 题号徽章 */
+        .q-badge {
+            background: #F1F5F9;
+            color: #334155;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            font-weight: bold;
+            font-family: sans-serif;
+            border: 1px solid #E2E8F0;
+            font-size: 14px;
+        }
+
+        /* 打印控制 - Optimized */
+        @media print {
+            @page {
+                margin: 1cm;
+            }
+
+            .no-print {
+                display: none !important;
+            }
+
+            .print-only {
+                display: block !important;
+            }
+
+            body,
+            main {
+                background: white;
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                box-shadow: none !important;
+            }
+
+            .avoid-break {
+                break-inside: avoid;
+            }
+        }
+
+        .print-only {
+            display: none;
+        }
+
+        /* Print layout tuning for PDF output */
+        :root {
+            --print-question-gap: 8px;
+            --print-question-gap-no-figure: 4px;
+            --print-answer-min-height: 26mm;
+            --print-answer-min-height-no-figure: 14mm;
+            --print-figure-width: 60mm;
+            --print-figure-height: 40mm;
+            --print-figure-min-width: 45mm;
+            --print-figure-min-height: 30mm;
+            --print-figure-max-width: 70mm;
+            --print-figure-max-height: 50mm;
+            --print-figure-min-width-complex: 60mm;
+            --print-figure-min-height-complex: 40mm;
+            --print-figure-max-width-complex: 90mm;
+            --print-figure-max-height-complex: 65mm;
+            --print-answer-column-gap: 12px;
+        }
+
+        .print-question {
+            padding-bottom: var(--print-question-gap);
+            margin-bottom: var(--print-question-gap);
+            border-bottom: 1px dashed #E5E7EB;
+        }
+
+        .print-question.no-figure {
+            padding-bottom: var(--print-question-gap-no-figure);
+            margin-bottom: var(--print-question-gap-no-figure);
+        }
+
+        .print-question:last-child {
+            padding-bottom: 0;
+            margin-bottom: 0;
+            border-bottom: none;
+        }
+
+        .print-q-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .print-q-number {
+            font-weight: bold;
+            min-width: 26px;
+        }
+
+        .print-q-body {
+            flex: 1 1 auto;
+        }
+
+        .print-q-text {
+            line-height: 1.6;
+        }
+
+        .print-stem {
+            margin-bottom: 4px;
+        }
+
+        .print-subq {
+            margin-top: 3px;
+            padding-left: 1.4em;
+            text-indent: -1.4em;
+        }
+
+        .print-answer-area {
+            margin-top: 6px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--print-answer-column-gap);
+            align-items: center;
+            min-height: max(var(--print-answer-min-height), min(var(--print-figure-height), var(--print-figure-max-height)));
+        }
+
+        .print-answer-area.no-figure {
+            grid-template-columns: 1fr;
+            min-height: var(--print-answer-min-height-no-figure);
+            margin-top: 4px;
+        }
+
+        .print-answer-left {
+            min-height: var(--print-answer-min-height);
+        }
+
+        .print-answer-lines {
+            width: 100%;
+            height: 100%;
+        }
+
+        .print-answer-right {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: var(--print-figure-height);
+        }
+
+        .print-figure {
+            width: clamp(var(--print-figure-min-width), var(--print-figure-width), var(--print-figure-max-width));
+            height: clamp(var(--print-figure-min-height), var(--print-figure-height), var(--print-figure-max-height));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .print-figure.is-complex {
+            width: clamp(var(--print-figure-min-width-complex), var(--print-figure-width), var(--print-figure-max-width-complex));
+            height: clamp(var(--print-figure-min-height-complex), var(--print-figure-height), var(--print-figure-max-height-complex));
+        }
+
+        .print-figure svg {
+            width: 100% !important;
+            height: 100% !important;
+            display: block;
+        }
+
+        .print-answer-block {
+            margin-top: 6px;
+        }
+
+        /* 滚动条美化 */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #94A3B8;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+
+<body class="min-h-screen flex flex-col">
+
+    <!-- 顶部导航由 nav.js 生成 -->
+
+    <!-- 顶部导航 (Special Design) -->
+    <header class="header-special text-white py-5 px-8 shadow-2xl mb-8 no-print sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-4">
+                <div
+                    class="w-14 h-14 bg-white/10 rounded-full flex items-center justify-center border-2 border-yellow-400/50 shadow-[0_0_15px_rgba(251,191,36,0.2)] backdrop-blur-md">
+                    <i class="fas fa-shield-alt text-3xl text-yellow-400"></i>
+                    <i
+                        class="fas fa-check absolute -bottom-1 -right-1 text-green-400 bg-white rounded-full text-xs p-1 border border-white"></i>
+                </div>
+                <div>
+                    <h1 class="text-3xl font-bold logo-text flex items-center">
+                        错题克星 <span
+                            class="ml-3 px-2 py-0.5 bg-yellow-500/20 text-yellow-300 text-xs rounded border border-yellow-500/50 font-sans tracking-normal">V3.0
+                            Pro</span>
+                    </h1>
+                    <p class="text-indigo-200 text-xs tracking-wider mt-1 opacity-80">INTELLIGENT MISTAKE BUSTER</p>
+                </div>
+            </div>
+            <div class="flex space-x-4">
+                <button onclick="printQuestionVer()"
+                    class="bg-indigo-900/50 hover:bg-indigo-800/50 text-white px-4 py-2.5 rounded-lg font-medium transition backdrop-blur-md border border-white/10">
+                    <i class="fas fa-file-alt mr-2"></i>打印题目
+                </button>
+                <button onclick="printAnswerVer()"
+                    class="bg-indigo-900/50 hover:bg-indigo-800/50 text-white px-4 py-2.5 rounded-lg font-medium transition backdrop-blur-md border border-white/10">
+                    <i class="fas fa-file-signature mr-2"></i>打印答案
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow px-6 md:px-10 max-w-7xl mx-auto w-full pb-20 pt-10">
+
+        <!-- 上传区域 -->
+                <div id="uploadStage"
+            class="text-center py-20 animate-fade-in no-print bg-white rounded-2xl shadow-sm border border-slate-200">
+            <div class="max-w-xl mx-auto p-12 cursor-pointer border-2 border-dashed border-slate-300 rounded-2xl hover:border-blue-500 hover:bg-blue-50/30 transition-all duration-300 group"
+                onclick="document.getElementById('fileInput').click()" id="dropZone">
+                <input type="file" id="fileInput" class="hidden" accept="image/*"
+                    onchange="handleFile(this.files[0]); this.value = null;">
+                <div
+                    class="text-6xl text-slate-200 group-hover:text-blue-400 group-hover:scale-110 transition-all duration-300 mb-6">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                </div>
+                <h3 class="text-xl font-bold text-slate-700 mb-2">错题克星 - 点击或粘贴错题图片</h3>
+                <p class="text-slate-400 text-sm mb-8">支持语数英物化生全科识别</p>
+                <div class="flex justify-center space-x-4 text-xs text-gray-400">
+                    <span class="px-3 py-1 bg-gray-100 rounded-full">📷 自动识别科目</span>
+                    <span class="px-3 py-1 bg-gray-100 rounded-full">🧠 K12全科逻辑</span>
+                    <span class="px-3 py-1 bg-gray-100 rounded-full">⚡ 智能生成30道变式</span>
+                </div>
+            </div>
+            <!-- 演示数据 -->
+            <button onclick="loadDemo()"
+                class="mt-8 text-indigo-500 hover:text-indigo-700 underline text-sm">试一试：演示语文作文题</button>
+        </div>
+
+        <!-- 加载中 -->
+                <div id="loadingStage" class="hidden text-center py-32 no-print">
+            <div
+                class="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-6">
+            </div>
+            <h3 class="text-2xl font-bold text-gray-800 mb-2">AI 教研员正在分析...</h3>
+            <p id="loadingText" class="text-gray-500 text-lg">识别题目学科归属...</p>
+        </div>
+
+        <!-- 结果展示 -->
+        <div id="resultStage" class="hidden grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+            <!-- 左侧：题源分析 -->
+            <div class="lg:col-span-4 space-y-6 no-print">
+                <div class="bg-white p-6 rounded-2xl shadow-lg border border-gray-100 sticky top-4">
+                    <div class="relative rounded-xl overflow-hidden mb-6 group cursor-pointer"
+                        onclick="document.getElementById('fileInput').click()">
+                        <img id="sourceImage" class="w-full object-contain" src="" alt="错题原图">
+                        <div
+                            class="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition text-white font-bold">
+                            <i class="fas fa-cloud-upload-alt mr-2"></i>上传新题目                        </div>
+                    </div>
+
+                    <div class="space-y-4">
+                        <div class="p-4 bg-indigo-50 rounded-xl">
+                            <span class="text-xs text-indigo-600 font-bold uppercase tracking-wider">Subject
+                                Analysis</span>
+                            <h3 id="subjectTag" class="text-xl font-bold text-indigo-900 mt-1">--</h3>
+                        </div>
+
+                        <div>
+                            <span class="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">核心考点</span>
+                            <p id="knowledgePoint" class="mt-3 text-gray-700 font-medium leading-relaxed">--</p>
+                        </div>
+
+                        <hr class="border-gray-100">
+
+                        <div>
+                            <span class="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold">易错陷阱</span>
+                            <p id="trapAnalysis" class="mt-3 text-gray-600 text-sm leading-relaxed text-justify">--</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧：变式题库 -->
+            <div class="lg:col-span-8">
+
+                                <!-- 变式切换Tab -->
+                <div class="flex space-x-2 bg-white p-2 rounded-full shadow-sm mb-6 no-print">
+                    <button onclick="switchTab(0)" id="tab0"
+                        class="flex-1 py-3 rounded-full text-center text-sm font-bold transition-all bg-indigo-600 text-white shadow-md">
+                        同类巩固 (5题)
+                    </button>
+                    <button onclick="switchTab(1)" id="tab1"
+                        class="flex-1 py-3 rounded-full text-center text-sm font-bold text-gray-500 hover:bg-gray-100 transition-all">
+                        逆向思维 (5题)
+                    </button>
+                    <button onclick="switchTab(2)" id="tab2"
+                        class="flex-1 py-3 rounded-full text-center text-sm font-bold text-gray-500 hover:bg-gray-100 transition-all">
+                        综合拓展 (5题)
+                    </button>
+                </div>
+
+                <!-- 变式内容列表 -->
+                <div id="variationContent" class="space-y-6 no-print pb-20">
+                    <!-- 动态插入 -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 打印区(隐藏) -->
+        <div id="printContainer" class="print-only max-w-4xl mx-auto">
+            <div class="text-center border-b-2 border-black pb-6 mb-8">
+                <h1 class="text-3xl font-bold text-black tracking-wider">错题克星 · 专项强化训练</h1>
+                <div class="flex justify-center space-x-12 mt-4 text-sm">
+                    <span>姓名：__________</span>
+                    <span>科目：<span id="printSubject"></span></span>
+                    <span>得分：__________</span>
+                </div>
+            </div>
+            <div id="printVariations" class="space-y-8">
+                <!-- JS填充 -->
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // const API_KEY = 'YOUR_API_KEY'; // Removed for security
+        // 使用 Pro 模型以获得更好的指令遵循和逻辑分析能力
+        const MODEL_NAME = "gemini-3-pro-preview";
+        const API_URL = '/api/chat'; // Updated to proxy
+
+        let currentVariations = [];
+        let currentSubject = "";
+        let currentContext = {
+            knowledge_point: "",
+            trap_analysis: "",
+            has_graphics: false,
+            problem_summary: "",
+            sub_questions: []
+        };
+
+        const AI_REQUEST_OPTIONS = {
+            temperature: 0.3
+        };
+
+        // UI Helpers
+        const tabs = ['同类巩固 (5题)', '逆向思维 (5题)', '综合拓展 (5题)'];
+
+        function switchTab(index) {
+            // Update UI State
+            document.querySelectorAll('button[id^="tab"]').forEach((btn, i) => {
+                if (i === index) {
+                    btn.className = "flex-1 py-3 rounded-full text-center text-sm font-bold transition-all bg-indigo-600 text-white shadow-md";
+                } else {
+                    btn.className = "flex-1 py-3 rounded-full text-center text-sm font-bold text-gray-500 hover:bg-gray-100 transition-all";
+                }
+            });
+
+            const items = currentVariations[index]?.items || [];
+            const container = document.getElementById('variationContent');
+
+            if (items.length === 0) {
+                container.innerHTML = `<div class="text-center py-20 text-gray-400">暂无数据</div>`;
+                return;
+            }
+
+            container.innerHTML = items.map((item, i) => `
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 card-hover transition duration-300">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="flex items-center space-x-3">
+                            <div class="q-badge">${i + 1}</div>
+                            <span class="text-xs text-gray-500 font-bold bg-gray-100 px-2 py-1 rounded">
+                                ${tabs[index].split('(')[0]} · 第${i + 1}题                            </span>
+                        </div>
+                        <button onclick="toggleAns('ans-${index}-${i}')" class="text-xs text-indigo-500 hover:bg-indigo-50 px-3 py-1 rounded-full transition">
+                            查看解析 <i class="fas fa-chevron-down ml-1"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="math-content text-lg text-gray-800 leading-loose pl-11 mb-4">
+                        ${item.question}
+                        ${item.svg ? `<div class="mt-4 p-4 bg-gray-50 border border-gray-100 rounded-lg flex justify-center">${item.svg}</div>` : ''}
+                    </div>
+
+                    <div id="ans-${index}-${i}" class="hidden pl-11 mt-4 pt-4 border-t border-dashed border-gray-200 bg-gray-50/50 rounded-b-xl -mx-6 px-6 pb-4">
+                        <div class="text-green-700 font-bold mb-1"><i class="fas fa-check-circle mr-1"></i>参考答案</div>
+                        <div class="mb-4 math-content text-gray-800">${item.answer}</div>
+                        
+                        <div class="text-orange-600 font-bold mb-1"><i class="fas fa-lightbulb mr-1"></i>深度解析</div>
+                        <div class="text-gray-600 text-sm math-content bg-orange-50 p-3 rounded-lg leading-relaxed text-justify">
+                            ${item.solution}
+                        </div>
+                    </div>
+                </div>
+            `).join('') + `
+                <div class="pt-8 pb-4 text-center no-print">
+                    <button onclick="loadMore(${index})" id="btn-load-more-${index}"
+                        class="btn-load-more text-white font-bold py-3 px-10 rounded-full shadow-lg flex items-center mx-auto space-x-2">
+                        <i class="fas fa-sync-alt animate-spin-slow"></i>
+                        <span>继续生成本类题目 (10题)</span>
+                    </button>
+                    <p class="text-gray-400 text-xs mt-3">基于当前知识点逻辑 · 智能无限生成</p>
+                </div>
+            `;
+
+            MathJax.typeset();
+        }
+
+        async function loadMore(index) {
+            const btn = document.getElementById(`btn-load-more-${index}`);
+            const originalContent = btn.innerHTML;
+            btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> 生成中...`;
+            btn.disabled = true;
+
+            const typeName = tabs[index].split('(')[0].trim();
+            const subQ = currentContext.sub_questions?.length
+                ? `原题包含小问：${currentContext.sub_questions.join("；")}`
+                : "原题为单问或未明确小问。";
+
+            // 分批生成策略：将10题分成4批（3+3+2+2），避免单次请求超时
+            const batchSizes = [3, 3, 2, 2];
+            const allItems = [];
+            let batchIndex = 0;
+
+            try {
+                for (const batchSize of batchSizes) {
+                    batchIndex++;
+                    btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> 生成中 (${allItems.length}/${10})...`;
+
+                    const prompt = `
+背景：用户正在针对"${currentSubject}"学科的"${currentContext.knowledge_point}"知识点进行专项训练。核心陷阱逻辑：${currentContext.trap_analysis}
+题干摘要：${currentContext.problem_summary || "（无）"}
+${subQ}
+图形需求：${currentContext.has_graphics ? "原题包含关键图形，请为新生成的每一道题也设计并生成对应的SVG代码。" : "原题无图形，生成的题目不需要图形。"}
+
+任务：请生成 **${batchSize}题** 全新的《${typeName}》变式题。要求：
+1. 保持与原题难度和逻辑一致。
+2. 题目内容**绝不重复**。
+3. 如果是理科，请更换数字或场景；如果是文科，请更换素材或语境。
+4. **解析必须详尽**：包含解题步骤、逻辑推导和易错点提示。
+5. 允许每道题为"题干 + 多小问"的小题组，用（1）（2）（3）标注小问。
+6. ${currentContext.has_graphics ? "**必须生成SVG**：每道题必须包含一个匹配题目数值和条件的 svg 字段。SVG代码要简洁、准确，不包含 markdown 标记。" : ""}
+
+注意：JSON字符串中的反斜杠必须转义（例如：LaTeX 用双反斜杠）。**仅输出严格JSON**，不要输出任何解释或Markdown。输出格式（JSON）：
+{
+  "items": [
+    {
+      "question": "...",
+      "answer": "...",
+      "solution": "第一步：... 第二步：... 核心逻辑：...",
+      ${currentContext.has_graphics ? '"svg": "<svg>...</svg>"' : ""}
+    },
+    ... (${batchSize}题)
+  ]
+}
+`;
+
+                    const batchData = await getJsonWithRepair({
+                        model: MODEL_NAME,
+                        messages: [{ role: "user", content: prompt }],
+                        response_format: { type: "json_object" },
+                        ...AI_REQUEST_OPTIONS
+                    }, "items[{question,answer,solution,svg?}]");
+
+                    if (batchData.items && Array.isArray(batchData.items)) {
+                        allItems.push(...batchData.items);
+                    }
+                }
+
+                // 合并所有批次结果并刷新
+                currentVariations[index].items.push(...allItems);
+                switchTab(index); // Re-render
+
+            } catch (error) {
+                // 如果部分批次成功，仍然保存已生成的题目
+                if (allItems.length > 0) {
+                    currentVariations[index].items.push(...allItems);
+                    switchTab(index);
+                    alert(`已生成 ${allItems.length} 题，部分生成失败：${error.message}`);
+                } else {
+                    alert("生成失败，请重试：" + error.message);
+                }
+                btn.innerHTML = originalContent;
+                btn.disabled = false;
+            }
+        }
+
+        window.toggleAns = (id) => {
+            document.getElementById(id).classList.toggle('hidden');
+        }
+
+        function escapeBackslashesInStrings(text) {
+            let out = "";
+            let inStr = false;
+            let escaped = false;
+            for (let i = 0; i < text.length; i++) {
+                const ch = text[i];
+                if (!inStr) {
+                    if (ch === '"') {
+                        inStr = true;
+                    }
+                    out += ch;
+                    continue;
+                }
+
+                if (ch === '"' && !escaped) {
+                    inStr = false;
+                    out += ch;
+                    continue;
+                }
+
+                if (ch === '\\') {
+                    out += '\\\\';
+                    escaped = true;
+                    continue;
+                }
+
+                if (ch === '\n' || ch === '\r') {
+                    out += '\\n';
+                    escaped = false;
+                    continue;
+                }
+
+                out += ch;
+                escaped = false;
+            }
+            return out;
+        }
+
+        function extractJsonText(raw) {
+            if (!raw) return "";
+            let text = String(raw).trim();
+            text = text.replace(/^\uFEFF/, "");
+            text = text.replace(/```json/gi, "").replace(/```/g, "");
+            const first = text.indexOf("{");
+            const last = text.lastIndexOf("}");
+            if (first === -1 || last === -1 || last <= first) return "";
+            text = text.slice(first, last + 1);
+            text = text.replace(/[“”]/g, "\"").replace(/[‘’]/g, "'");
+            text = text.replace(/,\s*([}\]])/g, "$1");
+            text = escapeBackslashesInStrings(text);
+            return text;
+        }
+
+        function tryParseJson(raw) {
+            if (raw && typeof raw === "object") return raw;
+            const jsonText = extractJsonText(raw);
+            if (!jsonText) return null;
+            try {
+                return JSON.parse(jsonText);
+            } catch (e) {
+                return null;
+            }
+        }
+
+        async function requestChat(payload) {
+            const response = await fetch(API_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const errText = await response.text();
+                console.error("API Error:", errText);
+                if (response.status === 524) {
+                    throw new Error("AI思考时间过长(超时)，请重试");
+                }
+                throw new Error(`服务器请求失败(${response.status})`);
+            }
+
+            const result = await response.json();
+            if (!result?.choices || result.choices.length === 0) {
+                throw new Error(result?.error?.message || "API无响应");
+            }
+
+            if (result.parsed) return result.parsed;
+            return result.choices[0]?.message?.content || "";
+        }
+
+        async function getJsonWithRepair(payload, schemaHint) {
+            const raw = await requestChat(payload);
+            if (raw && typeof raw === "object") return raw;
+            let data = tryParseJson(raw);
+            if (data) return data;
+
+            const repairPrompt = `你是一名严格的JSON修复器。请把下面内容修复为**严格JSON**，不要输出任何解释或Markdown。\n` +
+                `要求：保持语义不变，字段名必须符合以下结构提示：${schemaHint}\n` +
+                `注意：JSON字符串中的反斜杠必须转义（例如：LaTeX 用双反斜杠）。\n` +
+                `待修复内容：\n${raw}`;
+
+            const repairedRaw = await requestChat({
+                model: MODEL_NAME,
+                messages: [{ role: "user", content: repairPrompt }],
+                response_format: { type: "json_object" },
+                ...AI_REQUEST_OPTIONS
+            });
+
+            if (repairedRaw && typeof repairedRaw === "object") return repairedRaw;
+            data = tryParseJson(repairedRaw);
+            if (data) return data;
+
+            const minifyPrompt = `请将下面内容输出为**一行严格JSON**（不要换行、不要解释、不要Markdown）。` +
+                `字段结构提示：${schemaHint}\n` +
+                `注意：JSON字符串中的反斜杠必须转义。\n` +
+                `内容：\n${raw}`;
+
+            const minifiedRaw = await requestChat({
+                model: MODEL_NAME,
+                messages: [{ role: "user", content: minifyPrompt }],
+                response_format: { type: "json_object" },
+                ...AI_REQUEST_OPTIONS
+            });
+
+            if (minifiedRaw && typeof minifiedRaw === "object") return minifiedRaw;
+            data = tryParseJson(minifiedRaw);
+            if (data) return data;
+            throw new Error("AI生成的数据格式有误，请重试");
+        }
+
+        function normalizeAnalysis(data) {
+            if (!data || typeof data !== "object") {
+                throw new Error("AI分析结果为空");
+            }
+            const subject = String(data.subject || "").trim();
+            const knowledge_point = String(data.knowledge_point || "").trim();
+            const trap_analysis = String(data.trap_analysis || "").trim();
+
+            if (!subject || !knowledge_point || !trap_analysis) {
+                throw new Error("AI分析字段缺失");
+            }
+
+            return {
+                subject,
+                knowledge_point,
+                trap_analysis,
+                has_graphics: Boolean(data.has_graphics),
+                problem_summary: String(data.problem_summary || "").trim(),
+                sub_questions: Array.isArray(data.sub_questions) ? data.sub_questions : []
+            };
+        }
+
+        function normalizeVariations(data) {
+            if (!data || typeof data !== "object" || !Array.isArray(data.variations)) {
+                throw new Error("AI变式结构异常");
+            }
+            return data.variations;
+        }
+
+        async function generateVariationItems(typeName, analysis) {
+            const subQ = analysis.sub_questions?.length
+                ? `原题包含小问：${analysis.sub_questions.join("；")}`
+                : "原题为单问或未明确小问。";
+
+            const prompt = `
+请根据以下分析生成变式题（仅生成该类型，不要重复分析）：
+学科：${analysis.subject}
+核心考点：${analysis.knowledge_point}
+易错陷阱：${analysis.trap_analysis}
+题干摘要：${analysis.problem_summary || "（无）"}
+${subQ}
+图形要求：${analysis.has_graphics ? "需要SVG" : "不需要SVG"}
+类型：${typeName}
+
+任务：严格生成 **5题** 《${typeName}》变式题。每道题允许为“题干 + 多小问”的小题组，用（1）（2）（3）标注小问。难度与原题一致。
+若需要图形：每道题必须包含 svg 字段，值为简洁准确的 SVG 代码（不要 Markdown）。
+注意：JSON字符串中的反斜杠必须转义（例如：LaTeX 用双反斜杠）。
+**仅输出严格JSON**，不要输出任何解释或Markdown。输出格式：
+{
+  "items": [
+    { "question": "...", "answer": "...", "solution": "...", "svg": "..." },
+    ... (5题)
+  ]
+}
+`;
+
+
+            const data = await getJsonWithRepair({
+                model: MODEL_NAME,
+                messages: [{ role: "user", content: prompt }],
+                response_format: { type: "json_object" },
+                ...AI_REQUEST_OPTIONS
+            }, "items[{question,answer,solution,svg?}]");
+
+            let items = Array.isArray(data.items) ? data.items : [];
+            if (items.length < 5) {
+                const missing = 5 - items.length;
+                const fillPrompt = `
+你刚才的输出题量不足。请补全 **${missing}题** 《${typeName}》变式题。
+学科：${analysis.subject}
+核心考点：${analysis.knowledge_point}
+易错陷阱：${analysis.trap_analysis}
+题干摘要：${analysis.problem_summary || "（无）"}
+${subQ}
+图形要求：${analysis.has_graphics ? "需要SVG" : "不需要SVG"}
+注意：JSON字符串中的反斜杠必须转义（例如：LaTeX 用双反斜杠）。
+**仅输出严格JSON**，不要输出任何解释或Markdown。输出格式：
+{
+  "items": [
+    { "question": "...", "answer": "...", "solution": "...", "svg": "..." },
+    ... (${missing}题)
+  ]
+}
+`;
+
+
+                const fillData = await getJsonWithRepair({
+                    model: MODEL_NAME,
+                    messages: [{ role: "user", content: fillPrompt }],
+                    response_format: { type: "json_object" },
+                    ...AI_REQUEST_OPTIONS
+                }, "items[{question,answer,solution,svg?}]");
+
+                const fillItems = Array.isArray(fillData.items) ? fillData.items : [];
+                items = items.concat(fillItems).slice(0, 5);
+            }
+
+            return items.slice(0, 5);
+        }
+
+        // Analysis Logic
+        async function startAnalysis(imageData) {
+            // Credit Check
+            let creditOk = true;
+            try {
+                if (typeof window.CyberGongtou?.useCredit === "function") {
+                    creditOk = window.CyberGongtou.useCredit();
+                }
+            } catch (e) {
+                console.warn("Credit check failed, proceed without blocking.", e);
+                creditOk = true;
+            }
+            if (!creditOk) return;
+
+            document.getElementById('uploadStage').classList.add('hidden');
+            document.getElementById('loadingStage').classList.remove('hidden');
+            document.getElementById('resultStage').classList.add('hidden');
+
+            const loadingTexts = ["正在识别学科类型...", "调用K12全科知识库...", "分析题目陷阱逻辑...", "生成15道高质变式题...", "正在进行Latex渲染..."];
+            let step = 0;
+            const interval = setInterval(() => {
+                document.getElementById('loadingText').innerText = loadingTexts[step % loadingTexts.length];
+                step++;
+            }, 1500);
+
+            try {
+                let jsonResponse;
+                if (imageData === "DEMO_MODE") {
+                    await new Promise(r => setTimeout(r, 2000));
+                    jsonResponse = getDemoData();
+                    document.getElementById('sourceImage').src = "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?q=80&w=1000"; // Writing image
+                } else {
+                    document.getElementById('sourceImage').src = imageData;
+                    const base64Content = imageData.split(',')[1];
+
+                    const analysisPrompt = `
+你是一位K12全科金牌教研员。请**只做分析**，不要生成变式题。
+要求：如果题目包含多个小问，请拆分为 sub_questions 数组。problem_summary 用一句话概括题干与已知条件。
+判断是否需要图形：只有解题必须依赖题图/示意图时，has_graphics 才为 true。
+注意：JSON字符串中的反斜杠必须转义（例如：LaTeX 用双反斜杠）。**仅输出严格JSON**，不要输出任何解释或Markdown。输出格式：
+{
+  "subject": "...",
+  "knowledge_point": "...",
+  "trap_analysis": "...",
+  "has_graphics": true/false,
+  "problem_summary": "...",
+  "sub_questions": ["(1)...", "(2)..."]
+}
+`;
+
+
+                    const analysisRaw = await getJsonWithRepair({
+                        model: MODEL_NAME,
+                        messages: [{
+                            role: "user",
+                            content: [
+                                { type: "text", text: analysisPrompt },
+                                { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Content}` } }
+                            ]
+                        }],
+                        response_format: { type: "json_object" },
+                        ...AI_REQUEST_OPTIONS
+                    }, "analysis:{subject,knowledge_point,trap_analysis,has_graphics,problem_summary,sub_questions[]}");
+
+                    const analysis = normalizeAnalysis(analysisRaw);
+
+                    const variationTypes = ["同类巩固", "逆向思维", "综合拓展"];
+                    const variations = [];
+                    for (const typeName of variationTypes) {
+                        const items = await generateVariationItems(typeName, analysis);
+                        variations.push({ type: typeName, items });
+                    }
+
+                    jsonResponse = {
+                        subject: analysis.subject,
+                        knowledge_point: analysis.knowledge_point,
+                        trap_analysis: analysis.trap_analysis,
+                        has_graphics: analysis.has_graphics,
+                        problem_summary: analysis.problem_summary,
+                        sub_questions: analysis.sub_questions,
+                        variations
+                    };
+                }
+
+                clearInterval(interval);
+
+                // Render Data
+                currentVariations = jsonResponse.variations;
+                currentSubject = jsonResponse.subject;
+                currentContext = {
+                    knowledge_point: jsonResponse.knowledge_point,
+                    trap_analysis: jsonResponse.trap_analysis,
+                    has_graphics: jsonResponse.has_graphics || false,
+                    problem_summary: jsonResponse.problem_summary || "",
+                    sub_questions: Array.isArray(jsonResponse.sub_questions) ? jsonResponse.sub_questions : []
+                };
+
+                document.getElementById('subjectTag').innerText = jsonResponse.subject;
+                document.getElementById('printSubject').innerText = jsonResponse.subject;
+                document.getElementById('knowledgePoint').innerText = jsonResponse.knowledge_point;
+                document.getElementById('trapAnalysis').innerText = jsonResponse.trap_analysis;
+
+                renderPrintContent('question'); // 默认准备题目打印
+                document.getElementById('loadingStage').classList.add('hidden');
+                document.getElementById('resultStage').classList.remove('hidden');
+                switchTab(0);
+
+            } catch (error) {
+                clearInterval(interval);
+                console.error(error);
+                alert("出错啦：" + error.message);
+                document.getElementById('loadingStage').classList.add('hidden');
+                document.getElementById('uploadStage').classList.remove('hidden');
+            }
+        }
+
+        function extractSvgSize(svg) {
+            if (!svg || typeof svg !== "string") return null;
+            const widthMatch = svg.match(/\bwidth\s*=\s*["']?([\d.]+)([a-z%]*)["']?/i);
+            const heightMatch = svg.match(/\bheight\s*=\s*["']?([\d.]+)([a-z%]*)["']?/i);
+            if (!widthMatch || !heightMatch) return null;
+            const widthUnit = widthMatch[2] || "px";
+            const heightUnit = heightMatch[2] || "px";
+            return {
+                width: `${widthMatch[1]}${widthUnit}`,
+                height: `${heightMatch[1]}${heightUnit}`
+            };
+        }
+
+        function syncPrintFigureSize() {
+            let svg = null;
+            for (const vType of currentVariations) {
+                if (vType?.items?.length) {
+                    const found = vType.items.find((it) => typeof it.svg === "string" && it.svg.trim());
+                    if (found) {
+                        svg = found.svg;
+                        break;
+                    }
+                }
+            }
+            const size = extractSvgSize(svg);
+            if (!size) return;
+            const root = document.documentElement;
+            root.style.setProperty("--print-figure-width", size.width);
+            root.style.setProperty("--print-figure-height", size.height);
+        }
+
+        function splitQuestionParts(questionHtml) {
+            if (!questionHtml || typeof questionHtml !== "string") {
+                return { stem: "", subs: [] };
+            }
+            const markerRegex = /[（(]\d+[)）]|[①②③④⑤⑥⑦⑧⑨⑩]/g;
+            const matches = [...questionHtml.matchAll(markerRegex)];
+            if (!matches.length) {
+                return { stem: questionHtml, subs: [] };
+            }
+            const stem = questionHtml.slice(0, matches[0].index).trim();
+            const subs = matches.map((match, idx) => {
+                const start = match.index;
+                const end = idx + 1 < matches.length ? matches[idx + 1].index : questionHtml.length;
+                return questionHtml.slice(start, end).trim();
+            }).filter(Boolean);
+            return { stem, subs };
+        }
+
+        function formatQuestionForPrint(questionHtml) {
+            const { stem, subs } = splitQuestionParts(questionHtml);
+            if (!subs.length) {
+                return `<div class="math-content text-base text-justify print-q-text">${questionHtml}</div>`;
+            }
+            let html = "";
+            if (stem) {
+                html += `<div class="math-content text-base text-justify print-q-text print-stem">${stem}</div>`;
+            }
+            subs.forEach((sub) => {
+                html += `<div class="math-content text-base text-justify print-q-text print-subq">${sub}</div>`;
+            });
+            return html;
+        }
+
+        function getSvgComplexity(svg) {
+            if (!svg || typeof svg !== "string") return "simple";
+            const elementCount = (svg.match(/<\s*(path|rect|circle|ellipse|line|polyline|polygon|text|image)\b/gi) || []).length;
+            const length = svg.length;
+            if (elementCount >= 12 || length >= 1800) return "complex";
+            return "simple";
+        }
+
+        function renderPrintContent(mode) {
+            const container = document.getElementById('printVariations');
+            container.innerHTML = ''; // Clear previous
+            syncPrintFigureSize();
+            let html = '';
+
+            // 使用全局 currentVariations
+            currentVariations.forEach((vType, vIndex) => {
+                html += `
+                    <div class="mb-4">
+                        <h2 class="text-lg font-bold border-b-2 border-gray-800 mb-3 pb-1">${vType.type} - ${mode === 'answer' ? '答案解析' : '专项训练'}</h2>
+                        <div class="grid grid-cols-1 gap-0">
+                `;
+
+                vType.items.forEach((item, i) => {
+                    const hasSvg = Boolean(item.svg);
+                    const questionHtml = formatQuestionForPrint(item.question);
+                    const complexity = getSvgComplexity(item.svg);
+                    html += `
+                        <div class="print-question avoid-break ${hasSvg ? '' : 'no-figure'}">
+                            <div class="print-q-row">
+                                <span class="print-q-number text-base">${i + 1}.</span>
+                                <div class="print-q-body">
+                                    ${mode === 'question' ? `
+                                        ${questionHtml}
+                                        <div class="print-answer-area ${hasSvg ? '' : 'no-figure'}">
+                                            <div class="print-answer-left">
+                                                <div class="print-answer-lines"></div>
+                                            </div>
+                                            ${hasSvg ? `
+                                                <div class="print-answer-right">
+                                                    <div class="print-figure ${complexity === 'complex' ? 'is-complex' : ''}">${item.svg}</div>
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                    ` : `
+                                        <div class="print-answer-block">
+                                            <div class="mb-2 text-gray-800 font-bold math-content">参考答案：${item.answer}</div>
+                                            <div class="p-3 bg-gray-50 rounded border border-gray-200 text-sm math-content">
+                                                <span class="font-bold block mb-1">解析：</span>
+                                                ${item.solution}
+                                            </div>
+                                        </div>
+                                    `}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                html += `</div></div>`;
+            });
+
+            container.innerHTML = html;
+            try {
+                MathJax.typeset();
+            } catch (e) {
+                console.warn('MathJax 渲染异常', e);
+            }
+        }
+
+        window.printQuestionVer = () => {
+            renderPrintContent('question');
+            setTimeout(() => window.print(), 300); // 稍等渲染
+        };
+
+        window.printAnswerVer = () => {
+            renderPrintContent('answer');
+            setTimeout(() => window.print(), 300);
+        };
+
+        // Drag & Drop & File Handling
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-indigo-400'); });
+        dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); dropZone.classList.remove('border-indigo-400'); });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-indigo-400');
+            handleFile(e.dataTransfer.files[0]);
+        });
+
+        // Click Upload is handled by onchange in HTML
+
+        // Paste Upload
+        document.addEventListener('paste', (e) => {
+            const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+            for (let item of items) {
+                if (item.type.indexOf('image') !== -1) {
+                    handleFile(item.getAsFile());
+                    break;
+                }
+            }
+        });
+
+        function handleFile(file) {
+            if (!file) return;
+            // Validate file type
+            if (!file.type.startsWith('image/')) {
+                alert('请上传图片文件(JPG/PNG)');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => startAnalysis(e.target.result);
+            reader.onerror = () => alert('文件读取失败');
+            reader.readAsDataURL(file);
+        }
+
+        // 演示数据 Demo
+        window.loadDemo = () => startAnalysis("DEMO_MODE");
+        function getDemoData() {
+            // 返回一个语文作文逻辑的Demo
+            return {
+                "subject": "小学语文 · 创意写作",
+                "knowledge_point": "比喻与拟人修辞手法的运用，以及‘借物喻人’的写作逻辑。",
+                "trap_analysis": "学生常犯错误是‘喻体不当’，即把A比作B时，两者没有相似之处；或者拟人时只赋予了动作，没有赋予人的情感，导致句子干瘪，缺乏感染力。",
+                "variations": [
+                    {
+                        "type": "同类巩固（修辞仿写）",
+                        "items": Array(10).fill(0).map((_, i) => ({
+                            "question": `请仿照例句，用“拟人”的手法写一个关于“${['春风', '小溪', '闹钟', '书包', '太阳'][i % 5]}”的句子。例：顽皮的雨滴最爱在雨伞上尽情地跳舞。`,
+                            "answer": "略",
+                            "solution": "关键点：赋予物体人的动作或情感（如唱歌、睡觉、奔跑）。"
+                        }))
+                    },
+                    {
+                        "type": "逆向思维（病句修改）",
+                        "items": Array(10).fill(0).map((_, i) => ({
+                            "question": "判断下列句子修辞使用是否恰当，并修改：‘大树像一个巨大的蘑菇，在大声地唱歌。’",
+                            "answer": "不恰当。大树像蘑菇是比喻形状，大声唱歌是拟人，逻辑不通。",
+                            "solution": "修改：大树像一把巨大的绿伞，为我们遮挡烈日。"
+                        }))
+                    },
+                    {
+                        "type": "综合拓展（情景描写）",
+                        "items": Array(10).fill(0).map((_, i) => ({
+                            "question": "运用比喻和排比的手法，描写一段关于‘校园运动会’热闹场景的文字（50字左右）。",
+                            "answer": "略",
+                            "solution": "考核综合运用能力，注意句式整齐和画面感。"
+                        }))
+                    }
+                ]
+            };
+        }
+    </script>
+    <script src="../common/nav.js"></script>
+</body>
+
+</html>
+
+
