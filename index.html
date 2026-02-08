@@ -399,8 +399,8 @@
 
     <script>
         // const API_KEY = 'YOUR_API_KEY'; // Removed for security
-        // 使用 Pro 模型
-        const MODEL_NAME = "gemini-3-pro-preview";
+        // 使用 Flash 模型，兼顾速度与稳定性
+        const MODEL_NAME = "gemini-3-flash-preview";
         const API_URL = '/api/chat'; // Updated to proxy
         const VARIATION_TYPES = ["同类巩固", "逆向思维", "综合拓展"];
         const VARIATION_TARGET_COUNT = 5;
@@ -887,6 +887,144 @@
             return output;
         }
 
+        function detectUnreadableChars(text) {
+            const source = sanitizeReadableText(text);
+            if (!source) return [];
+            const issues = [];
+
+            if (/\uFFFD/.test(source)) issues.push("包含替换字符�");
+            if (/[ÃÂâ][\s\S]{0,1}/.test(source)) issues.push("疑似 UTF-8 乱码片段");
+            if (/(锛|鈥|鍙|鏄|鐨|璇|鍥|鎵|浠|甯|缁|瑙|鍒|鍏|鍙樺)/.test(source)) {
+                issues.push("疑似中文错码片段");
+            }
+            if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(source)) {
+                issues.push("包含控制字符");
+            }
+
+            return issues;
+        }
+
+        function validateSymbolReadability(item) {
+            const pool = [item?.question, item?.answer, item?.solution]
+                .map((part) => sanitizeReadableText(part))
+                .join("\n");
+            const issues = detectUnreadableChars(pool);
+            return {
+                ok: issues.length === 0,
+                issues
+            };
+        }
+
+        function validateSvgShapeAccuracy(item, hasGraphics) {
+            if (!hasGraphics) {
+                return { ok: true, issues: [] };
+            }
+
+            const svg = sanitizeSvgMarkup(item?.svg || "");
+            const issues = [];
+            if (!svg) {
+                issues.push("缺少可渲染 SVG");
+            }
+            if (svg && !/<svg[\s>]/i.test(svg)) {
+                issues.push("SVG 根标签缺失");
+            }
+            if (svg && !/\b(viewBox|width|height)\b/i.test(svg)) {
+                issues.push("SVG 缺少尺寸信息");
+            }
+
+            const question = sanitizeReadableText(item?.question || "");
+            const mentionsGeometry = /(抛物线|函数图像|坐标系|圆|直线|线段|三角形|四边形|角|点|平面|立体|示意图|图像)/.test(question);
+            if (mentionsGeometry && svg) {
+                const primitivePattern = /<(path|line|polyline|polygon|circle|ellipse|rect|text)\b/ig;
+                const primitiveCount = (svg.match(primitivePattern) || []).length;
+                if (primitiveCount < 2) {
+                    issues.push("SVG 图元数量不足，可能与题意不匹配");
+                }
+                if (!/(x|y|A|B|C|D|O|P|Q|R|S|T|\(|\)|坐标|轴)/.test(question) && /<text\b/i.test(svg)) {
+                    // 仅提示，不阻断
+                }
+            }
+
+            return {
+                ok: issues.length === 0,
+                issues
+            };
+        }
+
+        function evaluateItemQuality(item, hasGraphics) {
+            const textCheck = validateSymbolReadability(item);
+            const svgCheck = validateSvgShapeAccuracy(item, hasGraphics);
+            return {
+                ok: textCheck.ok && svgCheck.ok,
+                issues: [...textCheck.issues, ...svgCheck.issues]
+            };
+        }
+
+        async function refineVariationItemsWithStrictCheck({
+            items,
+            typeName,
+            analysis,
+            existingQuestions = [],
+            maxRounds = 2
+        }) {
+            let mergedItems = normalizeVariationItems(items, analysis.has_graphics, existingQuestions);
+
+            for (let round = 0; round < maxRounds; round++) {
+                const badItems = mergedItems.filter((item) => !evaluateItemQuality(item, analysis.has_graphics).ok);
+                if (badItems.length === 0) break;
+
+                const issuesText = badItems.map((item, idx) => {
+                    const report = evaluateItemQuality(item, analysis.has_graphics);
+                    return `${idx + 1}. 题干：${sanitizeReadableText(item.question)}\n问题：${report.issues.join("；")}`;
+                }).join("\n\n");
+
+                const prompt = `
+请修复下面这些题目中的可读性和图形准确性问题，并保持题型与难度不变。
+类型：${typeName}
+学科：${analysis.subject}
+核心考点：${analysis.knowledge_point}
+易错陷阱：${analysis.trap_analysis}
+图形要求：${analysis.has_graphics ? "必须提供与题意精确匹配的 SVG" : "不需要 SVG"}
+
+必须满足：
+1. 文本不得出现任何乱码和不可读符号。
+2. 学科符号必须规范、前端可读（数学/物理/化学/生物/地理）。
+3. 如果是几何、坐标、函数图像等题，SVG 必须与题意精确匹配（点、线、面、曲线、抛物线、坐标轴等要准确）。
+4. 仅输出严格 JSON。
+
+待修复问题：
+${issuesText}
+
+输出格式：
+{
+  "items": [
+    { "question": "...", "answer": "...", "solution": "...", "svg": "..." }
+  ]
+}
+`;
+
+                const repaired = await getJsonWithRepair({
+                    model: MODEL_NAME,
+                    messages: [{ role: "user", content: prompt }],
+                    response_format: { type: "json_object" },
+                    ...AI_REQUEST_OPTIONS
+                }, "items[{question,answer,solution,svg?}]");
+
+                const repairedItems = normalizeVariationItems(
+                    repaired?.items,
+                    analysis.has_graphics,
+                    existingQuestions
+                );
+
+                if (repairedItems.length > 0) {
+                    const keepItems = mergedItems.filter((item) => evaluateItemQuality(item, analysis.has_graphics).ok);
+                    mergedItems = keepItems.concat(repairedItems);
+                }
+            }
+
+            return mergedItems;
+        }
+
         function buildSubQuestionHint(subQuestions) {
             if (!Array.isArray(subQuestions) || subQuestions.length === 0) {
                 return "原题为单问或未明确小问。";
@@ -901,6 +1039,18 @@
 2. 数学、物理、化学、生物、地理中的符号必须规范显示，例如：±、×、÷、≤、≥、≠、∠、°、℃、μ、Ω、→。
 3. 化学式、物理量、数学表达式请使用前端可直接显示的规范写法（可使用 LaTeX）。
 4. 不要输出奇怪控制字符，不要输出无意义符号串。
+5. 题干、答案、解析中不得出现任何前端用户看不懂的符号。
+`;
+        }
+
+        function buildSvgAccuracyConstraint() {
+            return `
+图形准确性要求：
+1. 只要题目需要图形，必须输出与题意精确一致的 SVG，不得省略关键元素。
+2. 几何题：点、线、角、圆、三角形、四边形等位置关系要准确。
+3. 函数/坐标题：坐标轴、刻度、关键点、曲线（含抛物线）要和题目数据一致。
+4. 物理/化学/生物/地理图示：标注与结构必须对应题意，不得随意画示意图。
+5. SVG 必须可直接渲染，包含合理的 viewBox 或 width/height。
 `;
         }
 
@@ -922,6 +1072,7 @@ ${subQ}
 类型：${typeName}
 
 ${buildTextQualityConstraint()}
+${analysis.has_graphics ? buildSvgAccuracyConstraint() : ""}
 ${dedupeHint}
 
 任务：${fillHint} 每道题允许“题干 + 多小问”，用（1）（2）（3）标注小问，难度与原题一致。
@@ -955,6 +1106,13 @@ ${analysis.has_graphics ? "每道题必须包含 svg 字段，值为可直接渲
             }, "items[{question,answer,solution,svg?}]");
 
             let items = normalizeVariationItems(data?.items, analysis.has_graphics, existingQuestions);
+            items = await refineVariationItemsWithStrictCheck({
+                items,
+                typeName,
+                analysis,
+                existingQuestions,
+                maxRounds: 2
+            });
 
             if (items.length < batchSize) {
                 const missing = batchSize - items.length;
@@ -978,7 +1136,16 @@ ${analysis.has_graphics ? "每道题必须包含 svg 字段，值为可直接渲
                     analysis.has_graphics,
                     existingQuestions.concat(items.map((item) => item.question))
                 );
-                items = items.concat(fillItems);
+
+                const refinedFillItems = await refineVariationItemsWithStrictCheck({
+                    items: fillItems,
+                    typeName,
+                    analysis,
+                    existingQuestions: existingQuestions.concat(items.map((item) => item.question)),
+                    maxRounds: 2
+                });
+
+                items = items.concat(refinedFillItems);
             }
 
             return items.slice(0, batchSize);
