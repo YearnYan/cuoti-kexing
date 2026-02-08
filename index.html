@@ -399,13 +399,20 @@
 
     <script>
         // const API_KEY = 'YOUR_API_KEY'; // Removed for security
-        // 使用 Pro 模型以获得更好的指令遵循和逻辑分析能力
-        const MODEL_NAME = "gemini-3-pro-preview";
+        // 使用 Flash 模型提升响应速度（保持题量不变）
+        const MODEL_NAME = "gemini-3-flash-preview";
         const API_URL = '/api/chat'; // Updated to proxy
+        const VARIATION_TYPES = ["同类巩固", "逆向思维", "综合拓展"];
+        const VARIATION_TARGET_COUNT = 5;
+        const INITIAL_BATCH_PLAN = [2, 2, 1];
 
         let currentVariations = [];
         let currentSubject = "";
+        let activeTabIndex = 0;
+        let generationToken = 0;
+        let variationProgress = [];
         let currentContext = {
+            subject: "",
             knowledge_point: "",
             trap_analysis: "",
             has_graphics: false,
@@ -418,9 +425,60 @@
         };
 
         // UI Helpers
-        const tabs = ['同类巩固 (5题)', '逆向思维 (5题)', '综合拓展 (5题)'];
+        const tabs = VARIATION_TYPES.map((type) => `${type} (${VARIATION_TARGET_COUNT}题)`);
+
+        function resetVariationProgress() {
+            variationProgress = VARIATION_TYPES.map(() => ({
+                generated: 0,
+                target: VARIATION_TARGET_COUNT,
+                loading: false,
+                error: ""
+            }));
+        }
+
+        function getVariationTypeName(index) {
+            return VARIATION_TYPES[index] || `题型${index + 1}`;
+        }
+
+        function updateTabLabels() {
+            VARIATION_TYPES.forEach((typeName, index) => {
+                const btn = document.getElementById(`tab${index}`);
+                if (!btn) return;
+                const progress = variationProgress[index];
+                if (!progress) {
+                    btn.innerText = `${typeName} (${VARIATION_TARGET_COUNT}题)`;
+                    return;
+                }
+
+                const generated = Math.min(progress.generated, progress.target);
+                const shouldShowProgress = progress.loading || generated > 0 || Boolean(progress.error);
+                btn.innerText = shouldShowProgress
+                    ? `${typeName} (${generated}/${progress.target})`
+                    : `${typeName} (${progress.target}题)`;
+            });
+        }
+
+        function renderLoadMoreButton(index, disabled = false) {
+            return `
+                <div class="pt-8 pb-4 text-center no-print">
+                    <button onclick="loadMore(${index})" id="btn-load-more-${index}"
+                        ${disabled ? "disabled" : ""}
+                        class="btn-load-more text-white font-bold py-3 px-10 rounded-full shadow-lg flex items-center mx-auto space-x-2 ${disabled ? "opacity-60 cursor-not-allowed" : ""}">
+                        <i class="fas fa-sync-alt ${disabled ? "fa-spin" : "animate-spin-slow"}"></i>
+                        <span>${disabled ? "本类题目生成中..." : "继续生成本类题目 (10题)"}</span>
+                    </button>
+                    <p class="text-gray-400 text-xs mt-3">基于当前知识点逻辑 · 分批异步生成</p>
+                </div>
+            `;
+        }
+
+        resetVariationProgress();
+        updateTabLabels();
 
         function switchTab(index) {
+            activeTabIndex = index;
+            updateTabLabels();
+
             // Update UI State
             document.querySelectorAll('button[id^="tab"]').forEach((btn, i) => {
                 if (i === index) {
@@ -431,12 +489,37 @@
             });
 
             const items = currentVariations[index]?.items || [];
+            const progress = variationProgress[index] || { generated: 0, target: VARIATION_TARGET_COUNT, loading: false, error: "" };
+            const typeName = getVariationTypeName(index);
             const container = document.getElementById('variationContent');
 
             if (items.length === 0) {
+                if (progress.loading) {
+                    container.innerHTML = `
+                        <div class="bg-white rounded-2xl border border-indigo-100 p-10 text-center">
+                            <div class="w-10 h-10 border-4 border-indigo-200 border-t-indigo-500 rounded-full animate-spin mx-auto mb-4"></div>
+                            <div class="text-indigo-700 font-bold mb-2">${typeName}正在生成中...</div>
+                            <div class="text-gray-500 text-sm">已完成 ${progress.generated}/${progress.target} 题，结果会自动填入页面</div>
+                        </div>
+                    `;
+                    return;
+                }
+                if (progress.error) {
+                    container.innerHTML = `
+                        <div class="bg-white rounded-2xl border border-red-200 p-10 text-center">
+                            <div class="text-red-600 font-bold mb-2">${typeName}生成失败</div>
+                            <div class="text-gray-500 text-sm">${progress.error}</div>
+                        </div>
+                    `;
+                    return;
+                }
                 container.innerHTML = `<div class="text-center py-20 text-gray-400">暂无数据</div>`;
                 return;
             }
+
+            const progressHint = progress.loading
+                ? `<div class="mb-4 px-4 py-3 rounded-xl bg-indigo-50 text-indigo-700 text-sm font-medium border border-indigo-100">${typeName} 正在分批生成：${progress.generated}/${progress.target} 题</div>`
+                : "";
 
             container.innerHTML = items.map((item, i) => `
                 <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 card-hover transition duration-300">
@@ -444,7 +527,7 @@
                         <div class="flex items-center space-x-3">
                             <div class="q-badge">${i + 1}</div>
                             <span class="text-xs text-gray-500 font-bold bg-gray-100 px-2 py-1 rounded">
-                                ${tabs[index].split('(')[0]} · 第${i + 1}题                            </span>
+                                ${typeName} · 第${i + 1}题                            </span>
                         </div>
                         <button onclick="toggleAns('ans-${index}-${i}')" class="text-xs text-indigo-500 hover:bg-indigo-50 px-3 py-1 rounded-full transition">
                             查看解析 <i class="fas fa-chevron-down ml-1"></i>
@@ -452,110 +535,84 @@
                     </div>
                     
                     <div class="math-content text-lg text-gray-800 leading-loose pl-11 mb-4">
-                        ${item.question}
-                        ${item.svg ? `<div class="mt-4 p-4 bg-gray-50 border border-gray-100 rounded-lg flex justify-center">${item.svg}</div>` : ''}
+                        ${sanitizeReadableText(item.question)}
+                        ${item.svg ? `<div class="mt-4 p-4 bg-gray-50 border border-gray-100 rounded-lg flex justify-center">${sanitizeSvgMarkup(item.svg)}</div>` : ''}
                     </div>
 
                     <div id="ans-${index}-${i}" class="hidden pl-11 mt-4 pt-4 border-t border-dashed border-gray-200 bg-gray-50/50 rounded-b-xl -mx-6 px-6 pb-4">
                         <div class="text-green-700 font-bold mb-1"><i class="fas fa-check-circle mr-1"></i>参考答案</div>
-                        <div class="mb-4 math-content text-gray-800">${item.answer}</div>
+                        <div class="mb-4 math-content text-gray-800">${sanitizeReadableText(item.answer)}</div>
                         
                         <div class="text-orange-600 font-bold mb-1"><i class="fas fa-lightbulb mr-1"></i>深度解析</div>
                         <div class="text-gray-600 text-sm math-content bg-orange-50 p-3 rounded-lg leading-relaxed text-justify">
-                            ${item.solution}
+                            ${sanitizeReadableText(item.solution)}
                         </div>
                     </div>
                 </div>
-            `).join('') + `
-                <div class="pt-8 pb-4 text-center no-print">
-                    <button onclick="loadMore(${index})" id="btn-load-more-${index}"
-                        class="btn-load-more text-white font-bold py-3 px-10 rounded-full shadow-lg flex items-center mx-auto space-x-2">
-                        <i class="fas fa-sync-alt animate-spin-slow"></i>
-                        <span>继续生成本类题目 (10题)</span>
-                    </button>
-                    <p class="text-gray-400 text-xs mt-3">基于当前知识点逻辑 · 智能无限生成</p>
-                </div>
-            `;
+            `).join('') + progressHint + renderLoadMoreButton(index, progress.loading);
 
             MathJax.typeset();
         }
 
         async function loadMore(index) {
-            const btn = document.getElementById(`btn-load-more-${index}`);
-            const originalContent = btn.innerHTML;
-            btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> 生成中...`;
-            btn.disabled = true;
+            if (variationProgress[index]?.loading) return;
 
-            const typeName = tabs[index].split('(')[0].trim();
-            const subQ = currentContext.sub_questions?.length
-                ? `原题包含小问：${currentContext.sub_questions.join("；")}`
-                : "原题为单问或未明确小问。";
+            const btn = document.getElementById(`btn-load-more-${index}`);
+            if (btn) {
+                btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> 生成中...`;
+                btn.disabled = true;
+            }
+
+            variationProgress[index].loading = true;
+            variationProgress[index].error = "";
+            updateTabLabels();
+            if (activeTabIndex === index) switchTab(index);
+
+            const typeName = getVariationTypeName(index);
 
             // 分批生成策略：将10题分成4批（3+3+2+2），避免单次请求超时
             const batchSizes = [3, 3, 2, 2];
             const allItems = [];
-            let batchIndex = 0;
+            const existingQuestions = (currentVariations[index]?.items || [])
+                .map((item) => sanitizeReadableText(item.question))
+                .filter(Boolean)
+                .slice(-30);
 
             try {
                 for (const batchSize of batchSizes) {
-                    batchIndex++;
-                    btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> 生成中 (${allItems.length}/${10})...`;
+                    if (btn) {
+                        btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> 生成中 (${allItems.length}/10)...`;
+                    }
 
-                    const prompt = `
-背景：用户正在针对"${currentSubject}"学科的"${currentContext.knowledge_point}"知识点进行专项训练。核心陷阱逻辑：${currentContext.trap_analysis}
-题干摘要：${currentContext.problem_summary || "（无）"}
-${subQ}
-图形需求：${currentContext.has_graphics ? "原题包含关键图形，请为新生成的每一道题也设计并生成对应的SVG代码。" : "原题无图形，生成的题目不需要图形。"}
+                    const batchItems = await generateVariationBatch({
+                        typeName,
+                        analysis: currentContext,
+                        batchSize,
+                        existingQuestions
+                    });
 
-任务：请生成 **${batchSize}题** 全新的《${typeName}》变式题。要求：
-1. 保持与原题难度和逻辑一致。
-2. 题目内容**绝不重复**。
-3. 如果是理科，请更换数字或场景；如果是文科，请更换素材或语境。
-4. **解析必须详尽**：包含解题步骤、逻辑推导和易错点提示。
-5. 允许每道题为"题干 + 多小问"的小题组，用（1）（2）（3）标注小问。
-6. ${currentContext.has_graphics ? "**必须生成SVG**：每道题必须包含一个匹配题目数值和条件的 svg 字段。SVG代码要简洁、准确，不包含 markdown 标记。" : ""}
-
-注意：JSON字符串中的反斜杠必须转义（例如：LaTeX 用双反斜杠）。**仅输出严格JSON**，不要输出任何解释或Markdown。输出格式（JSON）：
-{
-  "items": [
-    {
-      "question": "...",
-      "answer": "...",
-      "solution": "第一步：... 第二步：... 核心逻辑：...",
-      ${currentContext.has_graphics ? '"svg": "<svg>...</svg>"' : ""}
-    },
-    ... (${batchSize}题)
-  ]
-}
-`;
-
-                    const batchData = await getJsonWithRepair({
-                        model: MODEL_NAME,
-                        messages: [{ role: "user", content: prompt }],
-                        response_format: { type: "json_object" },
-                        ...AI_REQUEST_OPTIONS
-                    }, "items[{question,answer,solution,svg?}]");
-
-                    if (batchData.items && Array.isArray(batchData.items)) {
-                        allItems.push(...batchData.items);
+                    if (batchItems.length > 0) {
+                        appendVariationItems(index, batchItems);
+                        allItems.push(...batchItems);
+                        existingQuestions.push(...batchItems.map((item) => sanitizeReadableText(item.question)).filter(Boolean));
+                        updateTabLabels();
+                        if (activeTabIndex === index) switchTab(index);
                     }
                 }
 
-                // 合并所有批次结果并刷新
-                currentVariations[index].items.push(...allItems);
-                switchTab(index); // Re-render
+                renderPrintContent('question');
 
             } catch (error) {
-                // 如果部分批次成功，仍然保存已生成的题目
-                if (allItems.length > 0) {
-                    currentVariations[index].items.push(...allItems);
-                    switchTab(index);
-                    alert(`已生成 ${allItems.length} 题，部分生成失败：${error.message}`);
-                } else {
-                    alert("生成失败，请重试：" + error.message);
-                }
-                btn.innerHTML = originalContent;
-                btn.disabled = false;
+                variationProgress[index].error = error.message || "生成失败";
+                if (activeTabIndex === index) switchTab(index);
+                alert(allItems.length > 0
+                    ? `已生成 ${allItems.length} 题，部分生成失败：${error.message}`
+                    : `生成失败，请重试：${error.message}`);
+            } finally {
+                variationProgress[index].loading = false;
+                variationProgress[index].generated = Math.min((currentVariations[index]?.items || []).length, variationProgress[index].target);
+                updateTabLabels();
+                if (activeTabIndex === index) switchTab(index);
             }
         }
 
@@ -692,13 +749,97 @@ ${subQ}
             throw new Error("AI生成的数据格式有误，请重试");
         }
 
+        function getReadableTextScore(text) {
+            if (!text) return -999;
+            const chineseCount = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+            const badCount = (text.match(/[�]/g) || []).length;
+            const latinMojibakeCount = (text.match(/[ÃÂâ€™“”]/g) || []).length;
+            return chineseCount * 2 - badCount * 8 - latinMojibakeCount * 3;
+        }
+
+        function tryRecoverUtf8Mojibake(text) {
+            if (!text || !/[ÃÂâ€™“”]/.test(text)) return text;
+            try {
+                const bytes = Uint8Array.from(Array.from(text).map((ch) => ch.charCodeAt(0) & 0xff));
+                const recovered = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+                return getReadableTextScore(recovered) > getReadableTextScore(text) ? recovered : text;
+            } catch {
+                return text;
+            }
+        }
+
+        function sanitizeReadableText(value) {
+            if (value === null || value === undefined) return "";
+            let text = String(value)
+                .replace(/\r\n/g, "\n")
+                .replace(/\r/g, "\n")
+                .replace(/^\uFEFF/, "")
+                .replace(/\uFFFD/g, "")
+                .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+
+            text = tryRecoverUtf8Mojibake(text);
+
+            const replaceMap = {
+                "﹣": "-",
+                "－": "-",
+                "–": "-",
+                "／": "/",
+                "％": "%",
+                "∶": ":",
+                "·": "·",
+                "•": "·",
+                "･": "·",
+                "（": "（",
+                "）": "）",
+                "【": "【",
+                "】": "】",
+                "“": "“",
+                "”": "”",
+                "‘": "‘",
+                "’": "’",
+                "…": "…",
+                "℃": "℃",
+                "µ": "μ"
+            };
+
+            for (const [from, to] of Object.entries(replaceMap)) {
+                text = text.split(from).join(to);
+            }
+
+            text = text
+                .replace(/[ \t]{2,}/g, " ")
+                .replace(/\n{3,}/g, "\n\n")
+                .trim();
+
+            return text;
+        }
+
+        function sanitizeSvgMarkup(svgInput) {
+            if (svgInput === null || svgInput === undefined) return "";
+            let svg = String(svgInput)
+                .replace(/^\uFEFF/, "")
+                .replace(/\uFFFD/g, "")
+                .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+                .replace(/```svg/gi, "")
+                .replace(/```/g, "")
+                .replace(/<script[\s\S]*?<\/script>/gi, "")
+                .replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, "")
+                .replace(/\son[a-z]+\s*=\s*'[^']*'/gi, "")
+                .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, "")
+                .trim();
+
+            if (!/<svg[\s>]/i.test(svg)) return "";
+            return svg;
+        }
+
         function normalizeAnalysis(data) {
             if (!data || typeof data !== "object") {
                 throw new Error("AI分析结果为空");
             }
-            const subject = String(data.subject || "").trim();
-            const knowledge_point = String(data.knowledge_point || "").trim();
-            const trap_analysis = String(data.trap_analysis || "").trim();
+
+            const subject = sanitizeReadableText(data.subject);
+            const knowledge_point = sanitizeReadableText(data.knowledge_point);
+            const trap_analysis = sanitizeReadableText(data.trap_analysis);
 
             if (!subject || !knowledge_point || !trap_analysis) {
                 throw new Error("AI分析字段缺失");
@@ -709,24 +850,68 @@ ${subQ}
                 knowledge_point,
                 trap_analysis,
                 has_graphics: Boolean(data.has_graphics),
-                problem_summary: String(data.problem_summary || "").trim(),
-                sub_questions: Array.isArray(data.sub_questions) ? data.sub_questions : []
+                problem_summary: sanitizeReadableText(data.problem_summary || ""),
+                sub_questions: Array.isArray(data.sub_questions)
+                    ? data.sub_questions.map((item) => sanitizeReadableText(item)).filter(Boolean)
+                    : []
             };
         }
 
-        function normalizeVariations(data) {
-            if (!data || typeof data !== "object" || !Array.isArray(data.variations)) {
-                throw new Error("AI变式结构异常");
-            }
-            return data.variations;
+        function normalizeVariationItem(rawItem, hasGraphics) {
+            const question = sanitizeReadableText(rawItem?.question);
+            const answer = sanitizeReadableText(rawItem?.answer);
+            const solution = sanitizeReadableText(rawItem?.solution);
+            const svg = hasGraphics ? sanitizeSvgMarkup(rawItem?.svg) : "";
+
+            return {
+                question,
+                answer,
+                solution,
+                ...(svg ? { svg } : {})
+            };
         }
 
-        async function generateVariationItems(typeName, analysis) {
-            const subQ = analysis.sub_questions?.length
-                ? `原题包含小问：${analysis.sub_questions.join("；")}`
-                : "原题为单问或未明确小问。";
+        function normalizeVariationItems(rawItems, hasGraphics, existingQuestions = []) {
+            if (!Array.isArray(rawItems)) return [];
+            const seen = new Set(existingQuestions.map((item) => sanitizeReadableText(item)).filter(Boolean));
+            const output = [];
 
-            const prompt = `
+            for (const rawItem of rawItems) {
+                const item = normalizeVariationItem(rawItem, hasGraphics);
+                if (!item.question || !item.answer || !item.solution) continue;
+                if (seen.has(item.question)) continue;
+                seen.add(item.question);
+                output.push(item);
+            }
+
+            return output;
+        }
+
+        function buildSubQuestionHint(subQuestions) {
+            if (!Array.isArray(subQuestions) || subQuestions.length === 0) {
+                return "原题为单问或未明确小问。";
+            }
+            return `原题包含小问：${subQuestions.join("；")}`;
+        }
+
+        function buildTextQualityConstraint() {
+            return `
+文本质量要求：
+1. 所有文本必须是前端可读的简体中文，不得出现乱码字符（如：�、锛、鈥、鍙 等）。
+2. 数学、物理、化学、生物、地理中的符号必须规范显示，例如：±、×、÷、≤、≥、≠、∠、°、℃、μ、Ω、→。
+3. 化学式、物理量、数学表达式请使用前端可直接显示的规范写法（可使用 LaTeX）。
+4. 不要输出奇怪控制字符，不要输出无意义符号串。
+`;
+        }
+
+        function buildVariationPrompt({ typeName, analysis, batchSize, existingQuestions = [], fillOnly = false }) {
+            const subQ = buildSubQuestionHint(analysis.sub_questions);
+            const dedupeHint = existingQuestions.length > 0
+                ? `以下题干禁止重复：\n${existingQuestions.slice(-8).map((item, idx) => `${idx + 1}. ${sanitizeReadableText(item)}`).join("\n")}`
+                : "";
+            const fillHint = fillOnly ? `补齐 ${batchSize} 题，且不得与已生成题目重复。` : `生成 ${batchSize} 题，且彼此不得重复。`;
+
+            return `
 请根据以下分析生成变式题（仅生成该类型，不要重复分析）：
 学科：${analysis.subject}
 核心考点：${analysis.knowledge_point}
@@ -736,18 +921,31 @@ ${subQ}
 图形要求：${analysis.has_graphics ? "需要SVG" : "不需要SVG"}
 类型：${typeName}
 
-任务：严格生成 **5题** 《${typeName}》变式题。每道题允许为“题干 + 多小问”的小题组，用（1）（2）（3）标注小问。难度与原题一致。
-若需要图形：每道题必须包含 svg 字段，值为简洁准确的 SVG 代码（不要 Markdown）。
+${buildTextQualityConstraint()}
+${dedupeHint}
+
+任务：${fillHint} 每道题允许“题干 + 多小问”，用（1）（2）（3）标注小问，难度与原题一致。
+${analysis.has_graphics ? "每道题必须包含 svg 字段，值为可直接渲染的 SVG 代码（不要 Markdown）。" : ""}
+
 注意：JSON字符串中的反斜杠必须转义（例如：LaTeX 用双反斜杠）。
-**仅输出严格JSON**，不要输出任何解释或Markdown。输出格式：
+仅输出严格JSON，不要输出任何解释或Markdown。输出格式：
 {
   "items": [
     { "question": "...", "answer": "...", "solution": "...", "svg": "..." },
-    ... (5题)
+    ... (${batchSize}题)
   ]
 }
 `;
+        }
 
+        async function generateVariationBatch({ typeName, analysis, batchSize, existingQuestions = [] }) {
+            const prompt = buildVariationPrompt({
+                typeName,
+                analysis,
+                batchSize,
+                existingQuestions,
+                fillOnly: false
+            });
 
             const data = await getJsonWithRepair({
                 model: MODEL_NAME,
@@ -756,27 +954,17 @@ ${subQ}
                 ...AI_REQUEST_OPTIONS
             }, "items[{question,answer,solution,svg?}]");
 
-            let items = Array.isArray(data.items) ? data.items : [];
-            if (items.length < 5) {
-                const missing = 5 - items.length;
-                const fillPrompt = `
-你刚才的输出题量不足。请补全 **${missing}题** 《${typeName}》变式题。
-学科：${analysis.subject}
-核心考点：${analysis.knowledge_point}
-易错陷阱：${analysis.trap_analysis}
-题干摘要：${analysis.problem_summary || "（无）"}
-${subQ}
-图形要求：${analysis.has_graphics ? "需要SVG" : "不需要SVG"}
-注意：JSON字符串中的反斜杠必须转义（例如：LaTeX 用双反斜杠）。
-**仅输出严格JSON**，不要输出任何解释或Markdown。输出格式：
-{
-  "items": [
-    { "question": "...", "answer": "...", "solution": "...", "svg": "..." },
-    ... (${missing}题)
-  ]
-}
-`;
+            let items = normalizeVariationItems(data?.items, analysis.has_graphics, existingQuestions);
 
+            if (items.length < batchSize) {
+                const missing = batchSize - items.length;
+                const fillPrompt = buildVariationPrompt({
+                    typeName,
+                    analysis,
+                    batchSize: missing,
+                    existingQuestions: existingQuestions.concat(items.map((item) => item.question)),
+                    fillOnly: true
+                });
 
                 const fillData = await getJsonWithRepair({
                     model: MODEL_NAME,
@@ -785,11 +973,89 @@ ${subQ}
                     ...AI_REQUEST_OPTIONS
                 }, "items[{question,answer,solution,svg?}]");
 
-                const fillItems = Array.isArray(fillData.items) ? fillData.items : [];
-                items = items.concat(fillItems).slice(0, 5);
+                const fillItems = normalizeVariationItems(
+                    fillData?.items,
+                    analysis.has_graphics,
+                    existingQuestions.concat(items.map((item) => item.question))
+                );
+                items = items.concat(fillItems);
             }
 
-            return items.slice(0, 5);
+            return items.slice(0, batchSize);
+        }
+
+        function appendVariationItems(index, incomingItems) {
+            if (!currentVariations[index]) return;
+            if (!Array.isArray(incomingItems) || incomingItems.length === 0) return;
+
+            const currentItems = Array.isArray(currentVariations[index].items) ? currentVariations[index].items : [];
+            const merged = normalizeVariationItems(
+                incomingItems,
+                Boolean(currentContext.has_graphics),
+                currentItems.map((item) => item.question)
+            );
+
+            if (merged.length > 0) {
+                currentVariations[index].items = currentItems.concat(merged);
+            }
+
+            if (variationProgress[index]) {
+                variationProgress[index].generated = Math.min(currentVariations[index].items.length, variationProgress[index].target);
+            }
+        }
+
+        function ensureGenerationTaskActive(taskToken) {
+            if (taskToken !== generationToken) {
+                throw new Error("任务已取消");
+            }
+        }
+
+        async function generateInitialVariations(analysis, taskToken) {
+            const tasks = VARIATION_TYPES.map((typeName, index) => (async () => {
+                const localQuestions = [];
+                variationProgress[index].loading = true;
+                variationProgress[index].error = "";
+                updateTabLabels();
+                if (activeTabIndex === index) switchTab(index);
+
+                try {
+                    for (const batchSize of INITIAL_BATCH_PLAN) {
+                        ensureGenerationTaskActive(taskToken);
+                        const batchItems = await generateVariationBatch({
+                            typeName,
+                            analysis,
+                            batchSize,
+                            existingQuestions: localQuestions
+                        });
+                        ensureGenerationTaskActive(taskToken);
+
+                        if (batchItems.length > 0) {
+                            appendVariationItems(index, batchItems);
+                            localQuestions.push(...batchItems.map((item) => item.question));
+                            updateTabLabels();
+                            if (activeTabIndex === index) switchTab(index);
+                            renderPrintContent('question');
+                        }
+                    }
+
+                    const generatedCount = currentVariations[index]?.items?.length || 0;
+                    if (generatedCount < VARIATION_TARGET_COUNT) {
+                        variationProgress[index].error = `本类题目生成不足：${generatedCount}/${VARIATION_TARGET_COUNT}`;
+                    }
+                } catch (error) {
+                    if (error.message !== "任务已取消") {
+                        variationProgress[index].error = error.message || "生成失败";
+                    }
+                } finally {
+                    variationProgress[index].loading = false;
+                    const generated = currentVariations[index]?.items?.length || 0;
+                    variationProgress[index].generated = Math.min(generated, variationProgress[index].target);
+                    updateTabLabels();
+                    if (activeTabIndex === index) switchTab(index);
+                }
+            })());
+
+            await Promise.allSettled(tasks);
         }
 
         // Analysis Logic
@@ -806,32 +1072,54 @@ ${subQ}
             }
             if (!creditOk) return;
 
+            generationToken++;
+            const taskToken = generationToken;
+            resetVariationProgress();
+            activeTabIndex = 0;
+
             document.getElementById('uploadStage').classList.add('hidden');
             document.getElementById('loadingStage').classList.remove('hidden');
             document.getElementById('resultStage').classList.add('hidden');
 
-            const loadingTexts = ["正在识别学科类型...", "调用K12全科知识库...", "分析题目陷阱逻辑...", "生成15道高质变式题...", "正在进行Latex渲染..."];
+            const loadingTexts = [
+                "正在识别学科类型...",
+                "正在提取题干与关键条件...",
+                "正在分析核心考点与易错陷阱...",
+                "分析完成后将分批展示题目..."
+            ];
             let step = 0;
             const interval = setInterval(() => {
                 document.getElementById('loadingText').innerText = loadingTexts[step % loadingTexts.length];
                 step++;
-            }, 1500);
+            }, 1200);
 
             try {
-                let jsonResponse;
+                let analysis;
                 if (imageData === "DEMO_MODE") {
-                    await new Promise(r => setTimeout(r, 2000));
-                    jsonResponse = getDemoData();
-                    document.getElementById('sourceImage').src = "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?q=80&w=1000"; // Writing image
+                    await new Promise(r => setTimeout(r, 1200));
+                    const demo = getDemoData();
+                    analysis = {
+                        subject: sanitizeReadableText(demo.subject),
+                        knowledge_point: sanitizeReadableText(demo.knowledge_point),
+                        trap_analysis: sanitizeReadableText(demo.trap_analysis),
+                        has_graphics: false,
+                        problem_summary: "演示题目：作文修辞专项练习。",
+                        sub_questions: []
+                    };
+                    document.getElementById('sourceImage').src = "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?q=80&w=1000";
                 } else {
                     document.getElementById('sourceImage').src = imageData;
                     const base64Content = imageData.split(',')[1];
 
                     const analysisPrompt = `
-你是一位K12全科金牌教研员。请**只做分析**，不要生成变式题。
-要求：如果题目包含多个小问，请拆分为 sub_questions 数组。problem_summary 用一句话概括题干与已知条件。
+你是一位K12全科金牌教研员。请只做题目分析，不要生成变式题。
+输出必须是前端可读中文，不得出现乱码字符（如：�、锛、鈥、鍙）。
+涉及数学、物理、化学、生物、地理时，符号请规范显示，例如：±、×、÷、≤、≥、≠、∠、°、℃、μ、Ω、→。
+如果题目包含多个小问，请拆分为 sub_questions 数组。
+problem_summary 用一句话概括题干与已知条件。
 判断是否需要图形：只有解题必须依赖题图/示意图时，has_graphics 才为 true。
-注意：JSON字符串中的反斜杠必须转义（例如：LaTeX 用双反斜杠）。**仅输出严格JSON**，不要输出任何解释或Markdown。输出格式：
+注意：JSON字符串中的反斜杠必须转义（例如：LaTeX 用双反斜杠）。
+仅输出严格JSON，不要输出任何解释或Markdown。输出格式：
 {
   "subject": "...",
   "knowledge_point": "...",
@@ -841,7 +1129,6 @@ ${subQ}
   "sub_questions": ["(1)...", "(2)..."]
 }
 `;
-
 
                     const analysisRaw = await getJsonWithRepair({
                         model: MODEL_NAME,
@@ -856,55 +1143,52 @@ ${subQ}
                         ...AI_REQUEST_OPTIONS
                     }, "analysis:{subject,knowledge_point,trap_analysis,has_graphics,problem_summary,sub_questions[]}");
 
-                    const analysis = normalizeAnalysis(analysisRaw);
-
-                    const variationTypes = ["同类巩固", "逆向思维", "综合拓展"];
-                    const variations = [];
-                    for (const typeName of variationTypes) {
-                        const items = await generateVariationItems(typeName, analysis);
-                        variations.push({ type: typeName, items });
-                    }
-
-                    jsonResponse = {
-                        subject: analysis.subject,
-                        knowledge_point: analysis.knowledge_point,
-                        trap_analysis: analysis.trap_analysis,
-                        has_graphics: analysis.has_graphics,
-                        problem_summary: analysis.problem_summary,
-                        sub_questions: analysis.sub_questions,
-                        variations
-                    };
+                    analysis = normalizeAnalysis(analysisRaw);
                 }
 
+                ensureGenerationTaskActive(taskToken);
                 clearInterval(interval);
 
-                // Render Data
-                currentVariations = jsonResponse.variations;
-                currentSubject = jsonResponse.subject;
+                // 先展示分析结果
+                currentSubject = analysis.subject;
                 currentContext = {
-                    knowledge_point: jsonResponse.knowledge_point,
-                    trap_analysis: jsonResponse.trap_analysis,
-                    has_graphics: jsonResponse.has_graphics || false,
-                    problem_summary: jsonResponse.problem_summary || "",
-                    sub_questions: Array.isArray(jsonResponse.sub_questions) ? jsonResponse.sub_questions : []
+                    subject: analysis.subject,
+                    knowledge_point: analysis.knowledge_point,
+                    trap_analysis: analysis.trap_analysis,
+                    has_graphics: Boolean(analysis.has_graphics),
+                    problem_summary: sanitizeReadableText(analysis.problem_summary || ""),
+                    sub_questions: Array.isArray(analysis.sub_questions) ? analysis.sub_questions.map((q) => sanitizeReadableText(q)).filter(Boolean) : []
                 };
 
-                document.getElementById('subjectTag').innerText = jsonResponse.subject;
-                document.getElementById('printSubject').innerText = jsonResponse.subject;
-                document.getElementById('knowledgePoint').innerText = jsonResponse.knowledge_point;
-                document.getElementById('trapAnalysis').innerText = jsonResponse.trap_analysis;
+                currentVariations = VARIATION_TYPES.map((type) => ({ type, items: [] }));
+                variationProgress.forEach((item) => {
+                    item.generated = 0;
+                    item.loading = true;
+                    item.error = "";
+                });
 
-                renderPrintContent('question'); // 默认准备题目打印
+                document.getElementById('subjectTag').innerText = currentSubject;
+                document.getElementById('printSubject').innerText = currentSubject;
+                document.getElementById('knowledgePoint').innerText = currentContext.knowledge_point;
+                document.getElementById('trapAnalysis').innerText = currentContext.trap_analysis;
+
                 document.getElementById('loadingStage').classList.add('hidden');
                 document.getElementById('resultStage').classList.remove('hidden');
+                updateTabLabels();
                 switchTab(0);
+                renderPrintContent('question');
+
+                // 分类型并行、分批填充题目
+                await generateInitialVariations(currentContext, taskToken);
 
             } catch (error) {
                 clearInterval(interval);
-                console.error(error);
-                alert("出错啦：" + error.message);
-                document.getElementById('loadingStage').classList.add('hidden');
-                document.getElementById('uploadStage').classList.remove('hidden');
+                if (error.message !== "任务已取消") {
+                    console.error(error);
+                    alert("出错啦：" + error.message);
+                    document.getElementById('loadingStage').classList.add('hidden');
+                    document.getElementById('uploadStage').classList.remove('hidden');
+                }
             }
         }
 
@@ -958,9 +1242,10 @@ ${subQ}
         }
 
         function formatQuestionForPrint(questionHtml) {
-            const { stem, subs } = splitQuestionParts(questionHtml);
+            const safeQuestion = sanitizeReadableText(questionHtml);
+            const { stem, subs } = splitQuestionParts(safeQuestion);
             if (!subs.length) {
-                return `<div class="math-content text-base text-justify print-q-text">${questionHtml}</div>`;
+                return `<div class="math-content text-base text-justify print-q-text">${safeQuestion}</div>`;
             }
             let html = "";
             if (stem) {
@@ -995,9 +1280,13 @@ ${subQ}
                 `;
 
                 vType.items.forEach((item, i) => {
-                    const hasSvg = Boolean(item.svg);
+                    const safeQuestion = sanitizeReadableText(item.question);
+                    const safeAnswer = sanitizeReadableText(item.answer);
+                    const safeSolution = sanitizeReadableText(item.solution);
+                    const safeSvg = sanitizeSvgMarkup(item.svg);
+                    const hasSvg = Boolean(safeSvg);
                     const questionHtml = formatQuestionForPrint(item.question);
-                    const complexity = getSvgComplexity(item.svg);
+                    const complexity = getSvgComplexity(safeSvg);
                     html += `
                         <div class="print-question avoid-break ${hasSvg ? '' : 'no-figure'}">
                             <div class="print-q-row">
@@ -1011,16 +1300,16 @@ ${subQ}
                                             </div>
                                             ${hasSvg ? `
                                                 <div class="print-answer-right">
-                                                    <div class="print-figure ${complexity === 'complex' ? 'is-complex' : ''}">${item.svg}</div>
+                                                    <div class="print-figure ${complexity === 'complex' ? 'is-complex' : ''}">${safeSvg}</div>
                                                 </div>
                                             ` : ''}
                                         </div>
                                     ` : `
                                         <div class="print-answer-block">
-                                            <div class="mb-2 text-gray-800 font-bold math-content">参考答案：${item.answer}</div>
+                                            <div class="mb-2 text-gray-800 font-bold math-content">参考答案：${safeAnswer}</div>
                                             <div class="p-3 bg-gray-50 rounded border border-gray-200 text-sm math-content">
                                                 <span class="font-bold block mb-1">解析：</span>
-                                                ${item.solution}
+                                                ${safeSolution}
                                             </div>
                                         </div>
                                     `}
@@ -1131,5 +1420,3 @@ ${subQ}
 </body>
 
 </html>
-
-
