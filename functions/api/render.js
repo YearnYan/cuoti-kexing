@@ -1,73 +1,21 @@
-﻿import express from "express";
-import cors from "cors";
-import path from "path";
-import { fileURLToPath } from "url";
-import dotenv from "dotenv";
 import OpenAI from "openai";
-import { jsonrepair } from "jsonrepair";
 
-dotenv.config();
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization"
+};
 
-const app = express();
-const port = process.env.PORT || 3000;
-
-app.use(cors());
-app.use(express.json({ limit: "25mb" }));
-app.use(express.urlencoded({ extended: true, limit: "25mb" }));
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  baseURL: process.env.OPENAI_BASE_URL || "https://api.openai.com/v1"
-});
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-app.use(express.static(__dirname));
-
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "错题克星.html"));
-});
-
-app.post("/api/chat", async (req, res) => {
-  try {
-    const { model, messages, response_format, ...rest } = req.body || {};
-
-    if (!model || !messages) {
-      return res.status(400).json({
-        error: { message: "model and messages are required" }
-      });
+function jsonResponse(data, status = 200, extraHeaders = {}) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      ...CORS_HEADERS,
+      ...extraHeaders
     }
-
-    const completion = await client.chat.completions.create({
-      model,
-      messages,
-      response_format,
-      ...rest
-    });
-
-    const content = completion?.choices?.[0]?.message?.content ?? "";
-    let parsed = null;
-    if (typeof content === "string" && content.trim()) {
-      try {
-        parsed = JSON.parse(content);
-      } catch (err) {
-        try {
-          const repaired = jsonrepair(content);
-          parsed = JSON.parse(repaired);
-        } catch {
-          parsed = null;
-        }
-      }
-    }
-
-    return res.json({ ...completion, parsed });
-  } catch (err) {
-    const status = err?.status || err?.response?.status || 500;
-    const message = err?.error?.message || err?.message || "Upstream error";
-    return res.status(status).json({ error: { message } });
-  }
-});
+  });
+}
 
 function sanitizeText(value) {
   if (value === null || value === undefined) return "";
@@ -215,6 +163,131 @@ function normalizeSvgTextNodes(svgInput) {
   }
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function normalizeOpenAIBaseURL(rawBaseURL) {
+  const fallback = "https://api.openai.com/v1";
+  const normalized = (rawBaseURL || fallback).trim().replace(/\/+$/, "");
+  const completionsSuffix = "/chat/completions";
+  if (normalized.endsWith(completionsSuffix)) {
+    return normalized.slice(0, -completionsSuffix.length);
+  }
+  return normalized;
+}
+
+function parseJsonSafe(text) {
+  if (typeof text !== "string") return null;
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+function buildGuaranteedDiagramSvg({ subject, mode, figureSpec }) {
+  const subjectText = sanitizeText(subject || "综合");
+  const modeText = sanitizeText(mode || "svg");
+  const description = normalizeScientificLabel(
+    sanitizeText(figureSpec?.description || figureSpec?.smiles || figureSpec?.tikz || figureSpec?.python || "")
+  ).slice(0, 42);
+
+  if (modeText === "smiles_rdkit") {
+    const atoms = (sanitizeText(figureSpec?.smiles || "").match(/Cl|Br|[A-Z][a-z]?/g) || []).slice(0, 6);
+    const chain = atoms.length >= 2 ? atoms : ["C", "C", "O"];
+    const step = chain.length > 1 ? 220 / (chain.length - 1) : 0;
+    const nodes = chain.map((atom, index) => ({
+      x: 70 + index * step,
+      y: 90 + (index % 2 === 0 ? 0 : -22),
+      atom
+    }));
+
+    const bonds = nodes.slice(0, -1)
+      .map((node, index) => `<line x1="${node.x}" y1="${node.y}" x2="${nodes[index + 1].x}" y2="${nodes[index + 1].y}" stroke="#0f172a" stroke-width="2.5"/>`)
+      .join("");
+
+    const atomNodes = nodes
+      .map((node) => `<circle cx="${node.x}" cy="${node.y}" r="15" fill="#ffffff" stroke="#1d4ed8" stroke-width="2"/><text x="${node.x}" y="${node.y + 5}" text-anchor="middle" font-size="13" fill="#0f172a" font-family="Arial">${escapeHtml(node.atom)}</text>`)
+      .join("");
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="180" viewBox="0 0 360 180" role="img" aria-label="化学结构图">
+  <rect x="1" y="1" width="358" height="178" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="16" y="24" font-size="14" fill="#334155" font-family="Arial, PingFang SC, Microsoft YaHei">${escapeHtml(subjectText)} · 结构示意</text>
+  ${bonds}
+  ${atomNodes}
+  <text x="16" y="164" font-size="12" fill="#64748b" font-family="Arial, PingFang SC, Microsoft YaHei">${escapeHtml(description || "分子骨架")}</text>
+</svg>`;
+  }
+
+  if (modeText === "tikz_or_matplotlib") {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="180" viewBox="0 0 360 180" role="img" aria-label="数学物理图形">
+  <rect x="1" y="1" width="358" height="178" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <line x1="48" y1="146" x2="320" y2="146" stroke="#0f172a" stroke-width="2"/>
+  <line x1="48" y1="146" x2="48" y2="34" stroke="#0f172a" stroke-width="2"/>
+  <polyline points="48,128 112,94 170,62 232,84 300,44" fill="none" stroke="#2563eb" stroke-width="2.4"/>
+  <line x1="170" y1="62" x2="215" y2="104" stroke="#dc2626" stroke-width="2"/>
+  <text x="221" y="108" font-size="12" fill="#dc2626" font-family="Arial">F</text>
+  <text x="328" y="150" font-size="12" fill="#0f172a" font-family="Arial">x</text>
+  <text x="40" y="28" font-size="12" fill="#0f172a" font-family="Arial">y</text>
+  <text x="16" y="24" font-size="14" fill="#334155" font-family="Arial, PingFang SC, Microsoft YaHei">${escapeHtml(subjectText)} · 坐标示意</text>
+  <text x="16" y="164" font-size="12" fill="#64748b" font-family="Arial, PingFang SC, Microsoft YaHei">${escapeHtml(description || "函数/受力关系图")}</text>
+</svg>`;
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="180" viewBox="0 0 360 180" role="img" aria-label="综合学科示意图">
+  <rect x="1" y="1" width="358" height="178" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
+  <ellipse cx="110" cy="90" rx="58" ry="42" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <circle cx="110" cy="90" r="16" fill="#ffffff" stroke="#2563eb" stroke-width="1.8"/>
+  <rect x="202" y="48" width="116" height="84" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <line x1="168" y1="90" x2="202" y2="90" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
+  <text x="16" y="24" font-size="14" fill="#334155" font-family="Arial, PingFang SC, Microsoft YaHei">${escapeHtml(subjectText)} · 图形示意</text>
+  <text x="16" y="164" font-size="12" fill="#64748b" font-family="Arial, PingFang SC, Microsoft YaHei">${escapeHtml(description || "关键结构关系图")}</text>
+</svg>`;
+}
+
+function normalizeFigureSpec(input) {
+  if (!input || typeof input !== "object") return null;
+  const mode = sanitizeText(input.mode || input.type || "svg").toLowerCase();
+  const description = sanitizeText(input.description || input.caption || input.prompt || "");
+
+  if (mode.includes("smiles")) {
+    const smiles = sanitizeText(input.smiles);
+    if (!smiles && !description) return null;
+    return {
+      mode: "smiles_rdkit",
+      smiles,
+      style: sanitizeText(input.style || "2d"),
+      description
+    };
+  }
+
+  if (mode.includes("tikz") || mode.includes("matplotlib") || mode.includes("python")) {
+    const tikz = sanitizeText(input.tikz || input.latex || "");
+    const python = sanitizeText(input.python || input.matplotlib || "");
+    if (!tikz && !python && !description) return null;
+    return {
+      mode: "tikz_or_matplotlib",
+      tikz,
+      python,
+      prefer: sanitizeText(input.prefer || (tikz ? "tikz" : "matplotlib")),
+      description
+    };
+  }
+
+  const svg = sanitizeSvg(input.svg || "");
+  if (!svg && !description) return null;
+  return { mode: "svg", svg, description };
+}
+
 function collectScientificTokens(figureSpec) {
   const sourceParts = [
     sanitizeText(figureSpec?.tikz || ""),
@@ -298,60 +371,6 @@ function appendScientificHintsToSvg(svgInput, figureSpec) {
   }
 }
 
-function escapeHtml(value) {
-  return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function parseJsonSafe(text) {
-  if (typeof text !== "string") return null;
-  const trimmed = text.trim();
-  if (!trimmed) return null;
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return null;
-  }
-}
-
-function normalizeFigureSpec(input) {
-  if (!input || typeof input !== "object") return null;
-  const mode = sanitizeText(input.mode || input.type || "svg").toLowerCase();
-  const description = sanitizeText(input.description || input.caption || input.prompt || "");
-
-  if (mode.includes("smiles")) {
-    const smiles = sanitizeText(input.smiles);
-    if (!smiles && !description) return null;
-    return {
-      mode: "smiles_rdkit",
-      smiles,
-      style: sanitizeText(input.style || "2d"),
-      description
-    };
-  }
-
-  if (mode.includes("tikz") || mode.includes("matplotlib") || mode.includes("python")) {
-    const tikz = sanitizeText(input.tikz || input.latex || "");
-    const python = sanitizeText(input.python || input.matplotlib || "");
-    if (!tikz && !python && !description) return null;
-    return {
-      mode: "tikz_or_matplotlib",
-      tikz,
-      python,
-      prefer: sanitizeText(input.prefer || (tikz ? "tikz" : "matplotlib")),
-      description
-    };
-  }
-
-  const svg = sanitizeSvg(input.svg || "");
-  if (!svg && !description) return null;
-  return { mode: "svg", svg, description };
-}
-
 async function renderByMatplotlibScript(pythonCode) {
   const code = sanitizeText(pythonCode);
   if (!code) {
@@ -380,6 +399,7 @@ async function renderByMatplotlibScript(pythonCode) {
   if (!safe) {
     throw new Error("Matplotlib 渲染结果不是有效 SVG");
   }
+
   return {
     svg: safe,
     renderer: "quickchart-matplotlib",
@@ -412,68 +432,7 @@ async function renderBySmiles(smiles) {
   };
 }
 
-function buildGuaranteedDiagramSvg({ subject, mode, figureSpec }) {
-  const subjectText = sanitizeText(subject || "综合");
-  const modeText = sanitizeText(mode || "svg");
-  const description = normalizeScientificLabel(
-    sanitizeText(figureSpec?.description || figureSpec?.smiles || figureSpec?.tikz || figureSpec?.python || "")
-  ).slice(0, 42);
-
-  if (modeText === "smiles_rdkit") {
-    const atoms = (sanitizeText(figureSpec?.smiles || "").match(/Cl|Br|[A-Z][a-z]?/g) || []).slice(0, 6);
-    const chain = atoms.length >= 2 ? atoms : ["C", "C", "O"];
-    const step = chain.length > 1 ? 220 / (chain.length - 1) : 0;
-    const nodes = chain.map((atom, index) => ({
-      x: 70 + index * step,
-      y: 90 + (index % 2 === 0 ? 0 : -22),
-      atom
-    }));
-
-    const bonds = nodes.slice(0, -1)
-      .map((node, index) => `<line x1="${node.x}" y1="${node.y}" x2="${nodes[index + 1].x}" y2="${nodes[index + 1].y}" stroke="#0f172a" stroke-width="2.5"/>`)
-      .join("");
-
-    const atomNodes = nodes
-      .map((node) => `<circle cx="${node.x}" cy="${node.y}" r="15" fill="#ffffff" stroke="#1d4ed8" stroke-width="2"/><text x="${node.x}" y="${node.y + 5}" text-anchor="middle" font-size="13" fill="#0f172a" font-family="Arial">${escapeHtml(node.atom)}</text>`)
-      .join("");
-
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="180" viewBox="0 0 360 180" role="img" aria-label="化学结构示意图">
-  <rect x="1" y="1" width="358" height="178" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
-  <text x="16" y="24" font-size="14" fill="#334155" font-family="Arial, PingFang SC, Microsoft YaHei">${escapeHtml(subjectText)} · 结构示意</text>
-  ${bonds}
-  ${atomNodes}
-  <text x="16" y="164" font-size="12" fill="#64748b" font-family="Arial, PingFang SC, Microsoft YaHei">${escapeHtml(description || "分子骨架")}</text>
-</svg>`;
-  }
-
-  if (modeText === "tikz_or_matplotlib") {
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="180" viewBox="0 0 360 180" role="img" aria-label="数学物理图形">
-  <rect x="1" y="1" width="358" height="178" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
-  <line x1="48" y1="146" x2="320" y2="146" stroke="#0f172a" stroke-width="2"/>
-  <line x1="48" y1="146" x2="48" y2="34" stroke="#0f172a" stroke-width="2"/>
-  <polyline points="48,128 112,94 170,62 232,84 300,44" fill="none" stroke="#2563eb" stroke-width="2.4"/>
-  <line x1="170" y1="62" x2="215" y2="104" stroke="#dc2626" stroke-width="2"/>
-  <text x="221" y="108" font-size="12" fill="#dc2626" font-family="Arial">F</text>
-  <text x="328" y="150" font-size="12" fill="#0f172a" font-family="Arial">x</text>
-  <text x="40" y="28" font-size="12" fill="#0f172a" font-family="Arial">y</text>
-  <text x="16" y="24" font-size="14" fill="#334155" font-family="Arial, PingFang SC, Microsoft YaHei">${escapeHtml(subjectText)} · 坐标示意</text>
-  <text x="16" y="164" font-size="12" fill="#64748b" font-family="Arial, PingFang SC, Microsoft YaHei">${escapeHtml(description || "函数/受力关系图")}</text>
-</svg>`;
-  }
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="180" viewBox="0 0 360 180" role="img" aria-label="综合学科示意图">
-  <rect x="1" y="1" width="358" height="178" rx="10" fill="#f8fafc" stroke="#cbd5e1"/>
-  <ellipse cx="110" cy="90" rx="58" ry="42" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
-  <circle cx="110" cy="90" r="16" fill="#ffffff" stroke="#2563eb" stroke-width="1.8"/>
-  <rect x="202" y="48" width="116" height="84" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
-  <line x1="168" y1="90" x2="202" y2="90" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
-  <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
-  <text x="16" y="24" font-size="14" fill="#334155" font-family="Arial, PingFang SC, Microsoft YaHei">${escapeHtml(subjectText)} · 图形示意</text>
-  <text x="16" y="164" font-size="12" fill="#64748b" font-family="Arial, PingFang SC, Microsoft YaHei">${escapeHtml(description || "关键结构关系图")}</text>
-</svg>`;
-}
-
-async function callAiSvgRenderer({ model, subject, figureSpec }) {
+async function callAiSvgRenderer({ client, model, subject, figureSpec }) {
   const prompt = `
 你是一个“学科图形渲染适配器”。
 任务：根据 figure_spec 产出可直接渲染的单个 SVG 字符串。
@@ -484,7 +443,7 @@ async function callAiSvgRenderer({ model, subject, figureSpec }) {
 3. 数学/物理：优先忠实表达 TikZ/Matplotlib 的坐标与标注。
 4. 化学：严格按 SMILES 表达，结构与键型合理。
 5. 生物/电路：保持符号规范、连线清晰。
-6. 图中文字不要输出 LaTeX 语法（禁止 ^2、_2、\\frac 这类未转义文本），请直接输出可显示字符（如 x²、H₂O、SO₄²⁻）。
+6. 图中文字不要输出 LaTeX 语法（禁止 ^2、_2、\frac 这类未转义文本），请直接输出可显示字符（如 x²、H₂O、SO₄²⁻）。
 
 subject: ${sanitizeText(subject)}
 figure_spec:
@@ -519,9 +478,20 @@ function shouldRetryWithFallbackModel(error) {
   return /无可用渠道|distributor|model.*unavailable|Service Unavailable/i.test(message);
 }
 
-async function callAiSvgRendererWithFallback({ model, fallbackModel, subject, figureSpec }) {
+async function callAiSvgRendererWithFallback({
+  client,
+  model,
+  fallbackModel,
+  subject,
+  figureSpec
+}) {
   try {
-    const rendered = await callAiSvgRenderer({ model, subject, figureSpec });
+    const rendered = await callAiSvgRenderer({
+      client,
+      model,
+      subject,
+      figureSpec
+    });
     return {
       ...rendered,
       modelUsed: model,
@@ -533,6 +503,7 @@ async function callAiSvgRendererWithFallback({ model, fallbackModel, subject, fi
     }
 
     const rendered = await callAiSvgRenderer({
+      client,
       model: fallbackModel,
       subject,
       figureSpec
@@ -546,17 +517,25 @@ async function callAiSvgRendererWithFallback({ model, fallbackModel, subject, fi
   }
 }
 
-app.post("/api/render", async (req, res) => {
+export const onRequestOptions = () => {
+  return new Response(null, {
+    status: 204,
+    headers: CORS_HEADERS
+  });
+};
+
+export const onRequestPost = async ({ request, env }) => {
   try {
-    const subject = sanitizeText(req.body?.subject || "");
-    const figureSpec = normalizeFigureSpec(req.body?.figure_spec);
+    const payload = await request.json();
+    const subject = sanitizeText(payload?.subject || "");
+    const figureSpec = normalizeFigureSpec(payload?.figure_spec);
 
     if (!figureSpec) {
-      return res.status(400).json({ error: { message: "figure_spec 缺失或格式不正确" } });
+      return jsonResponse({ error: { message: "figure_spec 缺失或格式不正确" } }, 400);
     }
 
     if (figureSpec.mode === "svg" && figureSpec.svg) {
-      return res.json({
+      return jsonResponse({
         ok: true,
         mode: "svg",
         svg: appendScientificHintsToSvg(figureSpec.svg, figureSpec),
@@ -568,7 +547,7 @@ app.post("/api/render", async (req, res) => {
     if (figureSpec.mode === "smiles_rdkit") {
       try {
         const rendered = await renderBySmiles(figureSpec.smiles);
-        return res.json({
+        return jsonResponse({
           ok: true,
           mode: figureSpec.mode,
           svg: appendScientificHintsToSvg(rendered.svg, figureSpec),
@@ -583,7 +562,7 @@ app.post("/api/render", async (req, res) => {
     if (figureSpec.mode === "tikz_or_matplotlib" && figureSpec.python) {
       try {
         const rendered = await renderByMatplotlibScript(figureSpec.python);
-        return res.json({
+        return jsonResponse({
           ok: true,
           mode: figureSpec.mode,
           svg: appendScientificHintsToSvg(rendered.svg, figureSpec),
@@ -595,8 +574,13 @@ app.post("/api/render", async (req, res) => {
       }
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-      return res.json({
+    const apiKey = env.OPENAI_API_KEY;
+    const baseURL = normalizeOpenAIBaseURL(env.OPENAI_BASE_URL);
+    const model = sanitizeText(env.RENDERER_MODEL || env.OPENAI_RENDERER_MODEL || env.OPENAI_MODEL || "gemini-3-flash-preview");
+    const fallbackModel = sanitizeText(env.RENDERER_FALLBACK_MODEL || "gemini-3-flash-preview");
+
+    if (!apiKey) {
+      return jsonResponse({
         ok: true,
         mode: figureSpec.mode,
         svg: buildGuaranteedDiagramSvg({ subject, mode: figureSpec.mode, figureSpec }),
@@ -607,18 +591,18 @@ app.post("/api/render", async (req, res) => {
       });
     }
 
-    const model = sanitizeText(process.env.RENDERER_MODEL || process.env.OPENAI_RENDERER_MODEL || process.env.OPENAI_MODEL || "gemini-3-flash-preview");
-    const fallbackModel = sanitizeText(process.env.RENDERER_FALLBACK_MODEL || "gemini-3-flash-preview");
+    const client = new OpenAI({ apiKey, baseURL });
     let rendered = null;
     try {
       rendered = await callAiSvgRendererWithFallback({
+        client,
         model,
         fallbackModel,
         subject,
         figureSpec
       });
     } catch (renderError) {
-      return res.json({
+      return jsonResponse({
         ok: true,
         mode: figureSpec.mode,
         svg: buildGuaranteedDiagramSvg({ subject, mode: figureSpec.mode, figureSpec }),
@@ -630,7 +614,7 @@ app.post("/api/render", async (req, res) => {
       });
     }
 
-    return res.json({
+    return jsonResponse({
       ok: true,
       mode: figureSpec.mode,
       svg: appendScientificHintsToSvg(rendered.svg, figureSpec),
@@ -641,15 +625,14 @@ app.post("/api/render", async (req, res) => {
       ...(rendered.warning ? { model_warning: rendered.warning } : {})
     });
   } catch (error) {
-    return res.status(error?.status || 500).json({
-      ok: false,
-      error: {
-        message: error?.message || "后端渲染失败"
-      }
-    });
+    return jsonResponse(
+      {
+        ok: false,
+        error: {
+          message: error?.message || "后端渲染失败"
+        }
+      },
+      error?.status || 500
+    );
   }
-});
-
-app.listen(port, "127.0.0.1", () => {
-  console.log(`Server running at http://127.0.0.1:${port}`);
-});
+};
