@@ -873,16 +873,63 @@
             };
         }
 
+        function buildQuestionSimilarityKey(question) {
+            return sanitizeReadableText(question || "")
+                .toLowerCase()
+                .replace(/[（(]\d+[)）]/g, "")
+                .replace(/\d+(?:\.\d+)?/g, "#")
+                .replace(/[，。；：、“”‘’"'`~!@#$%^&*()_+\-=\[\]{}|\\<>/?·,.:;\s]/g, "");
+        }
+
+        function buildTextNGramSet(text, n = 3) {
+            const safe = buildQuestionSimilarityKey(text);
+            const grams = new Set();
+            if (!safe) return grams;
+            if (safe.length <= n) {
+                grams.add(safe);
+                return grams;
+            }
+            for (let i = 0; i <= safe.length - n; i++) {
+                grams.add(safe.slice(i, i + n));
+            }
+            return grams;
+        }
+
+        function calcQuestionSimilarity(a, b) {
+            const setA = buildTextNGramSet(a);
+            const setB = buildTextNGramSet(b);
+            if (setA.size === 0 || setB.size === 0) return 0;
+
+            let intersection = 0;
+            setA.forEach((gram) => {
+                if (setB.has(gram)) intersection++;
+            });
+            const union = setA.size + setB.size - intersection;
+            if (union <= 0) return 0;
+            return intersection / union;
+        }
+
+        function isQuestionTooSimilar(question, candidates, threshold = 0.72) {
+            const safeQuestion = sanitizeReadableText(question || "");
+            if (!safeQuestion) return false;
+            if (!Array.isArray(candidates) || candidates.length === 0) return false;
+            return candidates.some((candidate) => calcQuestionSimilarity(safeQuestion, candidate) >= threshold);
+        }
+
         function normalizeVariationItems(rawItems, hasGraphics, existingQuestions = []) {
             if (!Array.isArray(rawItems)) return [];
-            const seen = new Set(existingQuestions.map((item) => sanitizeReadableText(item)).filter(Boolean));
+            const baseQuestions = existingQuestions.map((item) => sanitizeReadableText(item)).filter(Boolean);
+            const seen = new Set(baseQuestions);
+            const acceptedQuestions = [...baseQuestions];
             const output = [];
 
             for (const rawItem of rawItems) {
                 const item = normalizeVariationItem(rawItem, hasGraphics);
                 if (!item.question || !item.answer || !item.solution) continue;
                 if (seen.has(item.question)) continue;
+                if (isQuestionTooSimilar(item.question, acceptedQuestions)) continue;
                 seen.add(item.question);
+                acceptedQuestions.push(item.question);
                 output.push(item);
             }
 
@@ -914,6 +961,17 @@
 2. 数学、物理、化学、生物、地理中的符号必须规范显示，例如：±、×、÷、≤、≥、≠、∠、°、℃、μ、Ω、→。
 3. 化学式、物理量、数学表达式请使用前端可直接显示的规范写法（可使用 LaTeX）。
 4. 不要输出奇怪控制字符，不要输出无意义符号串。
+`;
+        }
+
+        function buildOriginalityConstraint(batchSize) {
+            return `
+原创差异化约束（必须满足）：
+1. ${batchSize}题在“情境背景、设问角度、条件组合”上必须明显不同，至少覆盖 3 种不同切入方式。
+2. 禁止仅替换数字/单位/名称后复用同一题干模板。
+3. 同批题目题干核心语句重复率应低于 30%，若相似必须主动重写。
+4. 至少一半题目使用不同求解路径或不同条件组合，不得同套路平移。
+5. 若与已生成题干高度相似，必须改写到低相似后再输出。
 `;
         }
 
@@ -1058,6 +1116,7 @@ ${graphicFacts}
 类型：${typeName}
 
 ${buildTextQualityConstraint()}
+${buildOriginalityConstraint(batchSize)}
 ${analysis.has_graphics ? buildGraphicStrongConstraint() : ""}
 ${dedupeHint}
 

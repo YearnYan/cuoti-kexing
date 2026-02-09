@@ -501,6 +501,10 @@
             const batchSizes = [3, 3, 2, 2];
             const allItems = [];
             let batchIndex = 0;
+            const existingQuestions = (currentVariations[index]?.items || [])
+                .map((item) => sanitizeReadableText(item.question))
+                .filter(Boolean)
+                .slice(-30);
 
             try {
                 for (const batchSize of batchSizes) {
@@ -515,7 +519,9 @@ ${graphicFacts}
 图形需求：${currentContext.has_graphics ? "原题包含关键图形，请为新生成的每一道题也设计并生成对应的SVG代码。" : "原题无图形，生成的题目不需要图形。"}
 
 ${buildTextQualityConstraint()}
+${buildOriginalityConstraint(batchSize)}
 ${currentContext.has_graphics ? buildGraphicStrongConstraint() : ""}
+${existingQuestions.length > 0 ? `以下题干禁止重复：\n${existingQuestions.slice(-8).map((item, idx) => `${idx + 1}. ${item}`).join("\n")}` : ""}
 
 任务：请生成 **${batchSize}题** 全新的《${typeName}》变式题。要求：
 1. 保持与原题难度和逻辑一致。
@@ -547,7 +553,8 @@ ${currentContext.has_graphics ? buildGraphicStrongConstraint() : ""}
                     }, "items[{question,answer,solution,svg?}]");
 
                     if (batchData.items && Array.isArray(batchData.items)) {
-                        let batchItems = normalizeVariationItems(batchData.items, currentContext.has_graphics);
+                        let batchItems = normalizeVariationItems(batchData.items, currentContext.has_graphics)
+                            .filter((item) => !isQuestionTooSimilar(item.question, existingQuestions));
                         batchItems = await enforcePhysicsConstraintsForItems({
                             analysis: {
                                 subject: currentSubject,
@@ -562,6 +569,7 @@ ${currentContext.has_graphics ? buildGraphicStrongConstraint() : ""}
                             items: batchItems
                         });
                         allItems.push(...batchItems);
+                        existingQuestions.push(...batchItems.map((item) => sanitizeReadableText(item.question)).filter(Boolean));
                     }
                 }
 
@@ -825,9 +833,62 @@ ${currentContext.has_graphics ? buildGraphicStrongConstraint() : ""}
 
         function normalizeVariationItems(rawItems, hasGraphics) {
             if (!Array.isArray(rawItems)) return [];
-            return rawItems
-                .map((item) => normalizeVariationItem(item, hasGraphics))
-                .filter(Boolean);
+            const output = [];
+            const acceptedQuestions = [];
+            const seen = new Set();
+            for (const rawItem of rawItems) {
+                const item = normalizeVariationItem(rawItem, hasGraphics);
+                if (!item) continue;
+                if (seen.has(item.question)) continue;
+                if (isQuestionTooSimilar(item.question, acceptedQuestions)) continue;
+                seen.add(item.question);
+                acceptedQuestions.push(item.question);
+                output.push(item);
+            }
+            return output;
+        }
+
+        function buildQuestionSimilarityKey(question) {
+            return sanitizeReadableText(question || "")
+                .toLowerCase()
+                .replace(/[（(]\d+[)）]/g, "")
+                .replace(/\d+(?:\.\d+)?/g, "#")
+                .replace(/[，。；：、“”‘’"'`~!@#$%^&*()_+\-=\[\]{}|\\<>/?·,.:;\s]/g, "");
+        }
+
+        function buildTextNGramSet(text, n = 3) {
+            const safe = buildQuestionSimilarityKey(text);
+            const grams = new Set();
+            if (!safe) return grams;
+            if (safe.length <= n) {
+                grams.add(safe);
+                return grams;
+            }
+            for (let i = 0; i <= safe.length - n; i++) {
+                grams.add(safe.slice(i, i + n));
+            }
+            return grams;
+        }
+
+        function calcQuestionSimilarity(a, b) {
+            const setA = buildTextNGramSet(a);
+            const setB = buildTextNGramSet(b);
+            if (setA.size === 0 || setB.size === 0) return 0;
+
+            let intersection = 0;
+            setA.forEach((gram) => {
+                if (setB.has(gram)) intersection++;
+            });
+            const union = setA.size + setB.size - intersection;
+            if (union <= 0) return 0;
+            return intersection / union;
+        }
+
+        function isQuestionTooSimilar(question, candidates, threshold = 0.72) {
+            const safeQuestion = sanitizeReadableText(question || "");
+            if (!safeQuestion) return false;
+            if (!Array.isArray(candidates) || candidates.length === 0) return false;
+            return candidates.some((candidate) => calcQuestionSimilarity(safeQuestion, candidate) >= threshold);
         }
 
         function buildPhysicsAuditPrompt({ analysis, typeName, items }) {
@@ -937,6 +998,17 @@ ${JSON.stringify(compactItems)}
             return `原题图形关键约束（必须保持关系一致，可替换数值）：${facts}`;
         }
 
+        function buildOriginalityConstraint(batchSize) {
+            return `
+原创差异化约束（必须满足）：
+1. ${batchSize}题在“情境背景、设问角度、条件组合”上必须明显不同，至少覆盖 3 种不同切入方式。
+2. 禁止仅替换数字/单位/名称后复用同一题干模板。
+3. 同批题目题干核心语句重复率应低于 30%，若相似必须主动重写。
+4. 至少一半题目使用不同求解路径或不同条件组合，不得同套路平移。
+5. 若与已生成题干高度相似，必须改写到低相似后再输出。
+`;
+        }
+
         async function generateVariationItems(typeName, analysis) {
             const subQ = analysis.sub_questions?.length
                 ? `原题包含小问：${analysis.sub_questions.join("；")}`
@@ -955,6 +1027,7 @@ ${graphicFacts}
 类型：${typeName}
 
 ${buildTextQualityConstraint()}
+${buildOriginalityConstraint(5)}
 ${analysis.has_graphics ? buildGraphicStrongConstraint() : ""}
 
 任务：严格生成 **5题** 《${typeName}》变式题。每道题允许为“题干 + 多小问”的小题组，用（1）（2）（3）标注小问。难度与原题一致。
@@ -990,6 +1063,7 @@ ${subQ}
 ${graphicFacts}
 图形要求：${analysis.has_graphics ? "需要SVG" : "不需要SVG"}
 ${buildTextQualityConstraint()}
+${buildOriginalityConstraint(missing)}
 ${analysis.has_graphics ? buildGraphicStrongConstraint() : ""}
 注意：JSON字符串中的反斜杠必须转义（例如：LaTeX 用双反斜杠）。
 **仅输出严格JSON**，不要输出任何解释或Markdown。输出格式：
