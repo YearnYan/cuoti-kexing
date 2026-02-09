@@ -402,11 +402,9 @@
         // 使用 Flash 模型提升响应速度（保持题量不变）
         const MODEL_NAME = "gemini-3-flash-preview";
         const API_URL = '/api/chat'; // Updated to proxy
-        const RENDER_API_URL = '/api/render';
         const VARIATION_TYPES = ["同类巩固", "逆向思维", "综合拓展"];
         const VARIATION_TARGET_COUNT = 5;
         const INITIAL_BATCH_PLAN = [2, 2, 1];
-        const FIGURE_RENDER_TIMEOUT_MS = 28000;
 
         let currentVariations = [];
         let currentSubject = "";
@@ -418,41 +416,12 @@
             knowledge_point: "",
             trap_analysis: "",
             has_graphics: false,
-            preferred_render_mode: "svg",
             problem_summary: "",
             sub_questions: []
         };
 
         const AI_REQUEST_OPTIONS = {
             temperature: 0.3
-        };
-
-        const CHEMISTRY_SUBSCRIPT_MAP = {
-            "0": "₀",
-            "1": "₁",
-            "2": "₂",
-            "3": "₃",
-            "4": "₄",
-            "5": "₅",
-            "6": "₆",
-            "7": "₇",
-            "8": "₈",
-            "9": "₉"
-        };
-
-        const CHEMISTRY_SUPERSCRIPT_MAP = {
-            "0": "⁰",
-            "1": "¹",
-            "2": "²",
-            "3": "³",
-            "4": "⁴",
-            "5": "⁵",
-            "6": "⁶",
-            "7": "⁷",
-            "8": "⁸",
-            "9": "⁹",
-            "+": "⁺",
-            "-": "⁻"
         };
 
         // UI Helpers
@@ -567,7 +536,7 @@
                     
                     <div class="math-content text-lg text-gray-800 leading-loose pl-11 mb-4">
                         ${sanitizeReadableText(item.question)}
-                        ${item.svg ? `<div class="mt-4 p-4 bg-gray-50 border border-gray-100 rounded-lg flex justify-center">${sanitizeSvgMarkup(item.svg, currentSubject)}</div>` : ''}
+                        ${item.svg ? `<div class="mt-4 p-4 bg-gray-50 border border-gray-100 rounded-lg flex justify-center">${sanitizeSvgMarkup(item.svg)}</div>` : ''}
                     </div>
 
                     <div id="ans-${index}-${i}" class="hidden pl-11 mt-4 pt-4 border-t border-dashed border-gray-200 bg-gray-50/50 rounded-b-xl -mx-6 px-6 pb-4">
@@ -582,7 +551,7 @@
                 </div>
             `).join('') + progressHint + renderLoadMoreButton(index, progress.loading);
 
-            safeMathJaxTypeset();
+            MathJax.typeset();
         }
 
         async function loadMore(index) {
@@ -788,427 +757,6 @@
             return chineseCount * 2 - badCount * 8 - latinMojibakeCount * 3;
         }
 
-        function isChemistrySubject(subject) {
-            return /化学|chem/i.test(String(subject || ""));
-        }
-
-        function toChemistrySubscriptDigits(value) {
-            return String(value || "").replace(/\d/g, (digit) => CHEMISTRY_SUBSCRIPT_MAP[digit] || digit);
-        }
-
-        function toChemistrySuperscriptDigits(value) {
-            return String(value || "").replace(/\d/g, (digit) => CHEMISTRY_SUPERSCRIPT_MAP[digit] || digit);
-        }
-
-        function normalizeChemistryInlineLabel(label) {
-            if (label === null || label === undefined) return "";
-
-            let text = String(label)
-                .replace(/\$/g, "")
-                .replace(/\\left|\\right/g, "")
-                .replace(/\\rightleftharpoons|\\leftrightarrow/g, "⇌")
-                .replace(/\\longrightarrow|\\rightarrow|=>|->/g, "→")
-                .replace(/<=>|<->|⇄/g, "⇌")
-                .replace(/\\uparrow/g, "↑")
-                .replace(/\\downarrow/g, "↓")
-                .replace(/\\cdot/g, "·")
-                .replace(/[ \t]{2,}/g, " ")
-                .trim();
-
-            text = text.replace(
-                /\b([A-Z][a-z]?)(\d+)([+-])\b/g,
-                (match, element, chargeNumber, chargeSign) => `${element}${toChemistrySuperscriptDigits(chargeNumber)}${CHEMISTRY_SUPERSCRIPT_MAP[chargeSign] || chargeSign}`
-            );
-
-            text = text.replace(
-                /\^\{?(\d+)?([+-])\}?/g,
-                (match, chargeNumber, chargeSign) => `${toChemistrySuperscriptDigits(chargeNumber || "")}${CHEMISTRY_SUPERSCRIPT_MAP[chargeSign] || chargeSign}`
-            );
-
-            text = text.replace(
-                /([A-Z][a-z]?|\)|\])(\d+)/g,
-                (match, prefix, count) => `${prefix}${toChemistrySubscriptDigits(count)}`
-            );
-
-            text = text.replace(
-                /([A-Za-z()\]₀₁₂₃₄₅₆₇₈₉·]+)([+-])(?=\s|$|[→⇌,.;:，。；、）)\]])/g,
-                (match, body, chargeSign) => `${body}${CHEMISTRY_SUPERSCRIPT_MAP[chargeSign] || chargeSign}`
-            );
-
-            return text;
-        }
-
-        function normalizeChemistryRichText(value) {
-            const safe = sanitizeReadableText(value);
-            return normalizeChemistryInlineLabel(safe);
-        }
-
-        function normalizeChemistrySvgMarkup(svgInput) {
-            if (!svgInput || typeof svgInput !== "string") return "";
-
-            let svg = svgInput
-                .replace(/\$+/g, "")
-                .replace(/\\rightleftharpoons|\\leftrightarrow/g, "⇌")
-                .replace(/\\longrightarrow|\\rightarrow|=>|->/g, "→")
-                .replace(/<=>|<->|⇄/g, "⇌")
-                .replace(/\\uparrow/g, "↑")
-                .replace(/\\downarrow/g, "↓");
-
-            if (typeof DOMParser === "undefined" || typeof XMLSerializer === "undefined") {
-                return svg;
-            }
-
-            try {
-                const parser = new DOMParser();
-                const xml = parser.parseFromString(svg, "image/svg+xml");
-                if (xml.querySelector("parsererror")) {
-                    return svg;
-                }
-
-                xml.querySelectorAll("text, tspan").forEach((node) => {
-                    const rawText = node.textContent || "";
-                    node.textContent = normalizeChemistryInlineLabel(rawText);
-                });
-
-                const root = xml.documentElement;
-                if (!root || root.nodeName.toLowerCase() !== "svg") {
-                    return svg;
-                }
-                return new XMLSerializer().serializeToString(root);
-            } catch {
-                return svg;
-            }
-        }
-
-        function getAiRequestOptionsBySubject(subject) {
-            if (isChemistrySubject(subject)) {
-                return { ...AI_REQUEST_OPTIONS, temperature: 0.2 };
-            }
-            return AI_REQUEST_OPTIONS;
-        }
-
-        function normalizeLatexBraces(textInput) {
-            if (textInput === null || textInput === undefined) return "";
-            let text = String(textInput);
-
-            text = text.replace(/\^\s*([A-Za-z0-9+\-])/g, '^{$1}');
-            text = text.replace(/_\s*([A-Za-z0-9+\-])/g, '_{$1}');
-
-            const balanceBraces = (source) => {
-                let out = "";
-                let depth = 0;
-                for (const ch of source) {
-                    if (ch === "{") {
-                        depth++;
-                        out += ch;
-                        continue;
-                    }
-                    if (ch === "}") {
-                        if (depth > 0) {
-                            depth--;
-                            out += ch;
-                        }
-                        continue;
-                    }
-                    out += ch;
-                }
-                if (depth > 0) {
-                    out += "}".repeat(depth);
-                }
-                return out;
-            };
-
-            return balanceBraces(text);
-        }
-
-        function safeMathJaxTypeset() {
-            try {
-                if (!window.MathJax) return;
-
-                if (typeof window.MathJax.typesetPromise === "function") {
-                    window.MathJax.typesetPromise()
-                        .catch((err) => {
-                            console.warn("MathJax typesetPromise 渲染异常", err);
-                        });
-                    return;
-                }
-
-                if (typeof window.MathJax.typeset === "function") {
-                    window.MathJax.typeset();
-                }
-            } catch (error) {
-                console.warn("MathJax 渲染异常", error);
-            }
-        }
-
-        function isMathOrPhysicsSubject(subject) {
-            return /数学|物理|math|physics/i.test(String(subject || ""));
-        }
-
-        function isBiologySubject(subject) {
-            return /生物|biology/i.test(String(subject || ""));
-        }
-
-        function isCircuitSubject(subject) {
-            return /电路|电学|circuit/i.test(String(subject || ""));
-        }
-
-        function getSubjectRenderMode(subject) {
-            if (isChemistrySubject(subject)) return "smiles_rdkit";
-            if (isMathOrPhysicsSubject(subject)) return "tikz_or_matplotlib";
-            if (isBiologySubject(subject) || isCircuitSubject(subject)) return "svg";
-            return "svg";
-        }
-
-        function normalizeFigureSpec(rawSpec, subject, rawItem = {}) {
-            let spec = rawSpec;
-            if (typeof spec === "string") {
-                try {
-                    spec = JSON.parse(spec);
-                } catch {
-                    spec = null;
-                }
-            }
-
-            if (!spec || typeof spec !== "object") {
-                if (rawItem?.smiles) {
-                    spec = {
-                        mode: "smiles_rdkit",
-                        smiles: sanitizeReadableText(rawItem.smiles)
-                    };
-                } else if (rawItem?.tikz || rawItem?.python || rawItem?.matplotlib) {
-                    spec = {
-                        mode: "tikz_or_matplotlib",
-                        tikz: sanitizeReadableText(rawItem.tikz || ""),
-                        python: sanitizeReadableText(rawItem.python || rawItem.matplotlib || ""),
-                        prefer: sanitizeReadableText(rawItem.prefer || "tikz"),
-                        description: sanitizeReadableText(rawItem.description || "")
-                    };
-                } else if (rawItem?.svg || rawItem?.description) {
-                    spec = {
-                        mode: "svg",
-                        svg: sanitizeSvgMarkup(rawItem.svg, subject),
-                        description: sanitizeReadableText(rawItem.description || "")
-                    };
-                }
-            }
-
-            if (!spec || typeof spec !== "object") {
-                return null;
-            }
-
-            const mode = sanitizeReadableText(spec.mode || spec.type || getSubjectRenderMode(subject)).toLowerCase();
-            const description = sanitizeReadableText(spec.description || spec.caption || spec.prompt || rawItem?.description || "");
-
-            if (mode.includes("smiles")) {
-                const smiles = sanitizeReadableText(spec.smiles || "");
-                if (!smiles && !description) return null;
-                return {
-                    mode: "smiles_rdkit",
-                    smiles,
-                    style: sanitizeReadableText(spec.style || "2d"),
-                    ...(description ? { description } : {})
-                };
-            }
-
-            if (mode.includes("tikz") || mode.includes("matplotlib") || mode.includes("python")) {
-                const tikz = sanitizeReadableText(spec.tikz || spec.latex || "");
-                const python = sanitizeReadableText(spec.python || spec.matplotlib || "");
-                const prefer = sanitizeReadableText(spec.prefer || (tikz ? "tikz" : "matplotlib"));
-                if (!tikz && !python && !description) return null;
-                return {
-                    mode: "tikz_or_matplotlib",
-                    tikz,
-                    python,
-                    prefer,
-                    ...(description ? { description } : {})
-                };
-            }
-
-            const svg = sanitizeSvgMarkup(spec.svg || rawItem?.svg || "", subject);
-            if (!svg && !description) return null;
-            return {
-                mode: "svg",
-                ...(svg ? { svg } : {}),
-                ...(description ? { description } : {})
-            };
-        }
-
-        function buildFigureSpecConstraint(analysis) {
-            if (!analysis?.has_graphics) {
-                return "图形协议：题目不依赖图形时，不要输出 figure_spec 和 svg 字段。";
-            }
-
-            const mode = getSubjectRenderMode(analysis.subject);
-
-            if (mode === "tikz_or_matplotlib") {
-                return `
-图形协议（必须）：
-1. 不要直接输出最终位图，必须输出 figure_spec 字段，由后端渲染。
-2. figure_spec.mode 固定为 "tikz_or_matplotlib"。
-3. 至少提供一个可执行脚本：tikz（完整 TikZ 代码）或 python（Matplotlib 脚本）。
-4. 建议同时提供 tikz 和 python 两套方案，并设置 prefer（"tikz" 或 "matplotlib"）。
-5. 图中坐标、标注、单位必须与题干数值一致。
-`;
-            }
-
-            if (mode === "smiles_rdkit") {
-                return `
-图形协议（必须）：
-1. 不要直接输出最终位图，必须输出 figure_spec 字段，由后端 RDKit 渲染。
-2. figure_spec.mode 固定为 "smiles_rdkit"。
-3. figure_spec.smiles 必须是合法 SMILES 字符串，和题干分子结构一致。
-4. 禁止输出不存在的价态或不可能分子结构。
-`;
-            }
-
-            return `
-图形协议（必须）：
-1. 不要直接输出最终位图，必须输出 figure_spec 字段，由后端处理。
-2. figure_spec.mode 固定为 "svg"，figure_spec.svg 为完整可渲染 SVG。
-3. 图形标注必须与题意一致，线条、箭头、颜色语义清晰。
-`;
-        }
-
-        async function requestFigureRender({ subject, figureSpec }) {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), FIGURE_RENDER_TIMEOUT_MS);
-            try {
-                const response = await fetch(RENDER_API_URL, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ subject, figure_spec: figureSpec, output: "svg" }),
-                    signal: controller.signal
-                });
-
-                const result = await response.json().catch(() => ({}));
-                if (!response.ok || !result?.ok) {
-                    throw new Error(result?.error?.message || `图形渲染失败(${response.status})`);
-                }
-
-                return result;
-            } finally {
-                clearTimeout(timeout);
-            }
-        }
-
-        function buildMandatoryFallbackFigureSpec(subject, item) {
-            const textParts = [
-                sanitizeReadableText(item?.question || ""),
-                sanitizeReadableText(item?.answer || ""),
-                sanitizeReadableText(item?.solution || "")
-            ].filter(Boolean);
-
-            return {
-                mode: getSubjectRenderMode(subject),
-                description: textParts.join("\n").slice(0, 900),
-                ...(isChemistrySubject(subject) ? { smiles: "O" } : {}),
-                ...(isMathOrPhysicsSubject(subject) ? {
-                    python: "import matplotlib.pyplot as plt\nfig,ax=plt.subplots(figsize=(4,2));ax.text(0.5,0.5,'Graph',ha='center',va='center');ax.axis('off')"
-                } : {})
-            };
-        }
-
-        async function ensureItemHasFigure(item, analysis) {
-            if (!analysis?.has_graphics) return item;
-            if (!item || typeof item !== "object") return item;
-
-            const existingSvg = sanitizeSvgMarkup(item.svg || "", analysis.subject);
-            if (existingSvg) {
-                item.svg = existingSvg;
-                return item;
-            }
-
-            const candidateSpecs = [];
-            const normalizedSpec = normalizeFigureSpec(item.figure_spec, analysis.subject, item);
-            if (normalizedSpec) {
-                candidateSpecs.push(normalizedSpec);
-            }
-
-            const mandatorySpec = buildMandatoryFallbackFigureSpec(analysis.subject, item);
-            candidateSpecs.push(mandatorySpec);
-
-            if (mandatorySpec.mode === "svg") {
-                candidateSpecs.push({
-                    mode: "svg",
-                    description: mandatorySpec.description
-                });
-            } else if (mandatorySpec.mode === "tikz_or_matplotlib") {
-                candidateSpecs.push({
-                    mode: "tikz_or_matplotlib",
-                    description: mandatorySpec.description,
-                    prefer: "matplotlib"
-                });
-            } else if (mandatorySpec.mode === "smiles_rdkit") {
-                candidateSpecs.push({
-                    mode: "smiles_rdkit",
-                    smiles: mandatorySpec.smiles || "C",
-                    description: mandatorySpec.description
-                });
-            }
-
-            for (const figureSpec of candidateSpecs) {
-                try {
-                    const rendered = await requestFigureRender({
-                        subject: analysis.subject,
-                        figureSpec
-                    });
-                    const safeSvg = sanitizeSvgMarkup(rendered?.svg || "", analysis.subject);
-                    if (safeSvg) {
-                        item.svg = safeSvg;
-                        item.figure_spec = figureSpec;
-                        return item;
-                    }
-                } catch (error) {
-                    console.warn("??????????????", error);
-                }
-            }
-
-            throw new Error("?????????????? SVG");
-        }
-
-        async function ensureEveryGraphicsItemHasFigure(items, analysis) {
-            if (!Array.isArray(items) || items.length === 0) return items;
-            if (!analysis?.has_graphics) return items;
-
-            const output = [];
-            for (const item of items) {
-                const fixed = await ensureItemHasFigure(item, analysis);
-                output.push(fixed);
-            }
-            return output;
-        }
-
-        async function hydrateVariationItemsFigures(items, analysis) {
-            if (!Array.isArray(items) || items.length === 0) return items;
-            if (!analysis?.has_graphics) return items;
-
-            for (const item of items) {
-                if (!item || typeof item !== "object") continue;
-                const spec = item.figure_spec || normalizeFigureSpec(null, analysis.subject, item);
-                if (!spec) continue;
-
-                try {
-                    const rendered = await requestFigureRender({
-                        subject: analysis.subject,
-                        figureSpec: spec
-                    });
-                    const safeSvg = sanitizeSvgMarkup(rendered?.svg || "", analysis.subject);
-                    if (safeSvg) {
-                        item.svg = safeSvg;
-                    }
-                    item.figure_spec = spec;
-                } catch (error) {
-                    console.warn("题图后端渲染失败，降级使用原始图形：", error);
-                    if (!item.svg && spec.mode === "svg" && spec.svg) {
-                        item.svg = sanitizeSvgMarkup(spec.svg, analysis.subject);
-                    }
-                }
-            }
-
-            return ensureEveryGraphicsItemHasFigure(items, analysis);
-        }
-
         function tryRecoverUtf8Mojibake(text) {
             if (!text || !/[ÃÂâ€™“”]/.test(text)) return text;
             try {
@@ -1263,10 +811,10 @@
                 .replace(/\n{3,}/g, "\n\n")
                 .trim();
 
-            return normalizeLatexBraces(text);
+            return text;
         }
 
-        function sanitizeSvgMarkup(svgInput, subject = "") {
+        function sanitizeSvgMarkup(svgInput) {
             if (svgInput === null || svgInput === undefined) return "";
             let svg = String(svgInput)
                 .replace(/^\uFEFF/, "")
@@ -1281,11 +829,6 @@
                 .trim();
 
             if (!/<svg[\s>]/i.test(svg)) return "";
-
-            if (isChemistrySubject(subject)) {
-                svg = normalizeChemistrySvgMarkup(svg);
-            }
-
             return svg;
         }
 
@@ -1297,7 +840,6 @@
             const subject = sanitizeReadableText(data.subject);
             const knowledge_point = sanitizeReadableText(data.knowledge_point);
             const trap_analysis = sanitizeReadableText(data.trap_analysis);
-            const preferred_render_mode = sanitizeReadableText(data.preferred_render_mode || "");
 
             if (!subject || !knowledge_point || !trap_analysis) {
                 throw new Error("AI分析字段缺失");
@@ -1308,7 +850,6 @@
                 knowledge_point,
                 trap_analysis,
                 has_graphics: Boolean(data.has_graphics),
-                preferred_render_mode,
                 problem_summary: sanitizeReadableText(data.problem_summary || ""),
                 sub_questions: Array.isArray(data.sub_questions)
                     ? data.sub_questions.map((item) => sanitizeReadableText(item)).filter(Boolean)
@@ -1316,29 +857,27 @@
             };
         }
 
-        function normalizeVariationItem(rawItem, hasGraphics, subject = "") {
-            const question = isChemistrySubject(subject) ? normalizeChemistryRichText(rawItem?.question) : sanitizeReadableText(rawItem?.question);
-            const answer = isChemistrySubject(subject) ? normalizeChemistryRichText(rawItem?.answer) : sanitizeReadableText(rawItem?.answer);
-            const solution = isChemistrySubject(subject) ? normalizeChemistryRichText(rawItem?.solution) : sanitizeReadableText(rawItem?.solution);
-            const svg = hasGraphics ? sanitizeSvgMarkup(rawItem?.svg, subject) : "";
-            const figure_spec = hasGraphics ? normalizeFigureSpec(rawItem?.figure_spec, subject, rawItem) : null;
+        function normalizeVariationItem(rawItem, hasGraphics) {
+            const question = sanitizeReadableText(rawItem?.question);
+            const answer = sanitizeReadableText(rawItem?.answer);
+            const solution = sanitizeReadableText(rawItem?.solution);
+            const svg = hasGraphics ? sanitizeSvgMarkup(rawItem?.svg) : "";
 
             return {
                 question,
                 answer,
                 solution,
-                ...(figure_spec ? { figure_spec } : {}),
                 ...(svg ? { svg } : {})
             };
         }
 
-        function normalizeVariationItems(rawItems, hasGraphics, existingQuestions = [], subject = "") {
+        function normalizeVariationItems(rawItems, hasGraphics, existingQuestions = []) {
             if (!Array.isArray(rawItems)) return [];
             const seen = new Set(existingQuestions.map((item) => sanitizeReadableText(item)).filter(Boolean));
             const output = [];
 
             for (const rawItem of rawItems) {
-                const item = normalizeVariationItem(rawItem, hasGraphics, subject);
+                const item = normalizeVariationItem(rawItem, hasGraphics);
                 if (!item.question || !item.answer || !item.solution) continue;
                 if (seen.has(item.question)) continue;
                 seen.add(item.question);
@@ -1365,21 +904,6 @@
 `;
         }
 
-        function buildChemistryQualityConstraint(analysis) {
-            if (!isChemistrySubject(analysis?.subject)) {
-                return "";
-            }
-
-            return `
-化学专项准确性要求：
-1. 化学式与离子符号必须严格正确，示例：H₂SO₄、Ca(OH)₂、SO₄²⁻、Fe³⁺、NH₄⁺。
-2. 化学方程式必须满足元素守恒和电荷守恒；反应方向符号仅使用 → 或 ⇌；气体/沉淀符号用 ↑、↓。
-3. 若生成SVG，图中文字标签禁止使用LaTeX（例如禁止 $H_2O$、\\mathrm{}），必须直接使用Unicode上下标。
-4. 若为实验装置图，器材形状与连接关系必须符合中学化学规范（烧杯、试管、导管、酒精灯、集气瓶）。
-5. 若为微观结构图，原子连接数与常见化合价必须合理，禁止不可能结构。
-`;
-        }
-
         function buildVariationPrompt({ typeName, analysis, batchSize, existingQuestions = [], fillOnly = false }) {
             const subQ = buildSubQuestionHint(analysis.sub_questions);
             const dedupeHint = existingQuestions.length > 0
@@ -1398,18 +922,16 @@ ${subQ}
 类型：${typeName}
 
 ${buildTextQualityConstraint()}
-${buildChemistryQualityConstraint(analysis)}
 ${dedupeHint}
 
 任务：${fillHint} 每道题允许“题干 + 多小问”，用（1）（2）（3）标注小问，难度与原题一致。
-${analysis.has_graphics ? "每道题必须包含 figure_spec 字段，供后端渲染。" : ""}
-${buildFigureSpecConstraint(analysis)}
+${analysis.has_graphics ? "每道题必须包含 svg 字段，值为可直接渲染的 SVG 代码（不要 Markdown）。" : ""}
 
 注意：JSON字符串中的反斜杠必须转义（例如：LaTeX 用双反斜杠）。
 仅输出严格JSON，不要输出任何解释或Markdown。输出格式：
 {
   "items": [
-    { "question": "...", "answer": "...", "solution": "...", "figure_spec": { "mode": "..." }, "svg": "..." },
+    { "question": "...", "answer": "...", "solution": "...", "svg": "..." },
     ... (${batchSize}题)
   ]
 }
@@ -1429,12 +951,10 @@ ${buildFigureSpecConstraint(analysis)}
                 model: MODEL_NAME,
                 messages: [{ role: "user", content: prompt }],
                 response_format: { type: "json_object" },
-                ...getAiRequestOptionsBySubject(analysis.subject)
-            }, "items[{question,answer,solution,figure_spec?,svg?}]");
+                ...AI_REQUEST_OPTIONS
+            }, "items[{question,answer,solution,svg?}]");
 
-            let items = normalizeVariationItems(data?.items, analysis.has_graphics, existingQuestions, analysis.subject);
-            items = await hydrateVariationItemsFigures(items, analysis);
-            items = await ensureEveryGraphicsItemHasFigure(items, analysis);
+            let items = normalizeVariationItems(data?.items, analysis.has_graphics, existingQuestions);
 
             if (items.length < batchSize) {
                 const missing = batchSize - items.length;
@@ -1450,18 +970,15 @@ ${buildFigureSpecConstraint(analysis)}
                     model: MODEL_NAME,
                     messages: [{ role: "user", content: fillPrompt }],
                     response_format: { type: "json_object" },
-                    ...getAiRequestOptionsBySubject(analysis.subject)
-                }, "items[{question,answer,solution,figure_spec?,svg?}]");
+                    ...AI_REQUEST_OPTIONS
+                }, "items[{question,answer,solution,svg?}]");
 
                 const fillItems = normalizeVariationItems(
                     fillData?.items,
                     analysis.has_graphics,
-                    existingQuestions.concat(items.map((item) => item.question)),
-                    analysis.subject
+                    existingQuestions.concat(items.map((item) => item.question))
                 );
-                const hydratedFillItems = await hydrateVariationItemsFigures(fillItems, analysis);
-                const finalizedFillItems = await ensureEveryGraphicsItemHasFigure(hydratedFillItems, analysis);
-                items = items.concat(finalizedFillItems);
+                items = items.concat(fillItems);
             }
 
             return items.slice(0, batchSize);
@@ -1475,8 +992,7 @@ ${buildFigureSpecConstraint(analysis)}
             const merged = normalizeVariationItems(
                 incomingItems,
                 Boolean(currentContext.has_graphics),
-                currentItems.map((item) => item.question),
-                currentContext.subject
+                currentItems.map((item) => item.question)
             );
 
             if (merged.length > 0) {
@@ -1599,10 +1115,6 @@ ${buildFigureSpecConstraint(analysis)}
 你是一位K12全科金牌教研员。请只做题目分析，不要生成变式题。
 输出必须是前端可读中文，不得出现乱码字符（如：�、锛、鈥、鍙）。
 涉及数学、物理、化学、生物、地理时，符号请规范显示，例如：±、×、÷、≤、≥、≠、∠、°、℃、μ、Ω、→。
-请额外判断 preferred_render_mode：
-- 数学/物理：tikz_or_matplotlib
-- 化学：smiles_rdkit
-- 生物/复杂电路：svg
 如果题目包含多个小问，请拆分为 sub_questions 数组。
 problem_summary 用一句话概括题干与已知条件。
 判断是否需要图形：只有解题必须依赖题图/示意图时，has_graphics 才为 true。
@@ -1613,7 +1125,6 @@ problem_summary 用一句话概括题干与已知条件。
   "knowledge_point": "...",
   "trap_analysis": "...",
   "has_graphics": true/false,
-  "preferred_render_mode": "tikz_or_matplotlib/smiles_rdkit/svg",
   "problem_summary": "...",
   "sub_questions": ["(1)...", "(2)..."]
 }
@@ -1629,8 +1140,8 @@ problem_summary 用一句话概括题干与已知条件。
                             ]
                         }],
                         response_format: { type: "json_object" },
-                        ...getAiRequestOptionsBySubject("all")
-                    }, "analysis:{subject,knowledge_point,trap_analysis,has_graphics,preferred_render_mode,problem_summary,sub_questions[]}");
+                        ...AI_REQUEST_OPTIONS
+                    }, "analysis:{subject,knowledge_point,trap_analysis,has_graphics,problem_summary,sub_questions[]}");
 
                     analysis = normalizeAnalysis(analysisRaw);
                 }
@@ -1645,7 +1156,6 @@ problem_summary 用一句话概括题干与已知条件。
                     knowledge_point: analysis.knowledge_point,
                     trap_analysis: analysis.trap_analysis,
                     has_graphics: Boolean(analysis.has_graphics),
-                    preferred_render_mode: analysis.preferred_render_mode || getSubjectRenderMode(analysis.subject),
                     problem_summary: sanitizeReadableText(analysis.problem_summary || ""),
                     sub_questions: Array.isArray(analysis.sub_questions) ? analysis.sub_questions.map((q) => sanitizeReadableText(q)).filter(Boolean) : []
                 };
@@ -1773,7 +1283,7 @@ problem_summary 用一句话概括题干与已知条件。
                     const safeQuestion = sanitizeReadableText(item.question);
                     const safeAnswer = sanitizeReadableText(item.answer);
                     const safeSolution = sanitizeReadableText(item.solution);
-                    const safeSvg = sanitizeSvgMarkup(item.svg, currentSubject);
+                    const safeSvg = sanitizeSvgMarkup(item.svg);
                     const hasSvg = Boolean(safeSvg);
                     const questionHtml = formatQuestionForPrint(item.question);
                     const complexity = getSvgComplexity(safeSvg);
@@ -1813,7 +1323,11 @@ problem_summary 用一句话概括题干与已知条件。
             });
 
             container.innerHTML = html;
-            safeMathJaxTypeset();
+            try {
+                MathJax.typeset();
+            } catch (e) {
+                console.warn('MathJax 渲染异常', e);
+            }
         }
 
         window.printQuestionVer = () => {
