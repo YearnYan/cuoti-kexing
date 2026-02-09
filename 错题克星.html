@@ -402,6 +402,10 @@
         // 使用 Pro 模型以获得更好的指令遵循和逻辑分析能力
         const MODEL_NAME = "gemini-3-pro-preview";
         const API_URL = '/api/chat'; // Updated to proxy
+        const API_FALLBACK_URLS = [
+            '/api/chat',
+            `${window.location.origin}/api/chat`
+        ];
 
         let currentVariations = [];
         let currentSubject = "";
@@ -660,28 +664,38 @@ ${existingQuestions.length > 0 ? `以下题干禁止重复：\n${existingQuestio
         }
 
         async function requestChat(payload) {
-            const response = await fetch(API_URL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
-            });
+            let lastError = null;
 
-            if (!response.ok) {
-                const errText = await response.text();
-                console.error("API Error:", errText);
-                if (response.status === 524) {
-                    throw new Error("AI思考时间过长(超时)，请重试");
+            for (const apiUrl of API_FALLBACK_URLS) {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        const errText = await response.text();
+                        console.error("API Error:", apiUrl, errText);
+                        if (response.status === 524) {
+                            throw new Error("AI思考时间过长(超时)，请重试");
+                        }
+                        throw new Error(`服务器请求失败(${response.status})`);
+                    }
+
+                    const result = await response.json();
+                    if (!result?.choices || result.choices.length === 0) {
+                        throw new Error(result?.error?.message || "API无响应");
+                    }
+
+                    if (result.parsed) return result.parsed;
+                    return result.choices[0]?.message?.content || "";
+                } catch (error) {
+                    lastError = error;
                 }
-                throw new Error(`服务器请求失败(${response.status})`);
             }
 
-            const result = await response.json();
-            if (!result?.choices || result.choices.length === 0) {
-                throw new Error(result?.error?.message || "API无响应");
-            }
-
-            if (result.parsed) return result.parsed;
-            return result.choices[0]?.message?.content || "";
+            throw (lastError || new Error("请求失败，请稍后重试"));
         }
 
         async function getJsonWithRepair(payload, schemaHint) {
