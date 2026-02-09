@@ -371,6 +371,59 @@ function appendScientificHintsToSvg(svgInput, figureSpec) {
   }
 }
 
+function buildPhysicsSvgAuditPrompt({ subject, figureSpec, svg }) {
+  return `
+你是“题图物理一致性审计器 + SVG修复器”。
+任务：对给定 SVG 做真实世界规则审计，若有错误必须修复后输出。
+
+输入：
+- 学科：${sanitizeText(subject)}
+- figure_spec：${JSON.stringify(figureSpec)}
+- svg：${sanitizeText(svg)}
+
+必须满足的硬约束：
+1. 元素映射：figure_spec 中对象、符号、数值、单位、方向全部一一对应。
+2. 空间关系：上下/左右/内外/中间/邻接/相交/重合/接触/包含/平行/垂直必须成立。
+3. 接触与穿透：接触对象只能边界接触，禁止穿透（例如滑块进入斜面内部）。
+4. 力学规律：重力竖直向下、法线垂直接触面、摩擦沿切向、绳力沿绳方向。
+5. 连通规律：电路端点真实连通无悬空，光路反射折射与法线关系正确。
+6. 标注规律：标签、上下标、编号、单位与题干一致且不遮挡关键结构。
+
+输出严格JSON（不要解释、不要Markdown）：
+{
+  "is_valid": true,
+  "violations": [],
+  "corrected_svg": "<svg ...>...</svg>"
+}
+
+输出要求：
+- 无论是否违规，都必须返回 corrected_svg。
+- corrected_svg 必须是单个可渲染 SVG 根节点。
+`;
+}
+
+async function auditAndFixSvgByAi({ client, model, subject, figureSpec, svg }) {
+  const safeInput = sanitizeSvg(svg);
+  if (!safeInput) return "";
+
+  const prompt = buildPhysicsSvgAuditPrompt({
+    subject,
+    figureSpec,
+    svg: safeInput
+  });
+
+  const completion = await client.chat.completions.create({
+    model,
+    messages: [{ role: "user", content: prompt }],
+    response_format: { type: "json_object" },
+    temperature: 0.1
+  });
+
+  const parsed = parseJsonSafe(completion?.choices?.[0]?.message?.content || "");
+  const corrected = sanitizeSvg(parsed?.corrected_svg || parsed?.svg || "");
+  return corrected || safeInput;
+}
+
 async function renderByMatplotlibScript(pythonCode) {
   const code = sanitizeText(pythonCode);
   if (!code) {
@@ -468,9 +521,22 @@ ${JSON.stringify(figureSpec)}
 
   const parsed = parseJsonSafe(completion?.choices?.[0]?.message?.content || "");
   const rawSvg = parsed?.svg || "";
-  const svg = appendScientificHintsToSvg(rawSvg, figureSpec);
-  if (!svg) {
+  const svgWithHints = appendScientificHintsToSvg(rawSvg, figureSpec);
+  if (!svgWithHints) {
     throw new Error("AI 渲染结果未返回有效 SVG");
+  }
+
+  let svg = svgWithHints;
+  try {
+    svg = await auditAndFixSvgByAi({
+      client,
+      model,
+      subject,
+      figureSpec,
+      svg: svgWithHints
+    });
+  } catch {
+    svg = svgWithHints;
   }
 
   return {

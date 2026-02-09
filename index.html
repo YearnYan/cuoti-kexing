@@ -927,14 +927,115 @@
 5. 几何与拓扑一致：共线、共圆、角度、长度比例、对称、连通、闭合关系必须与题意一致，禁止自相矛盾。
 6. 数值标注一致：图中文字、字母编号、上下标、单位、箭头方向必须与题干完全一致，同一对象命名必须前后一致。
 7. 物理世界一致性（核心）：
-   - 力学：物体只能位于可达且可接触位置，不能嵌入斜面/墙体/地面；受力、约束、运动方向必须合理。
+   - 力学接触约束：接触=边界接触且无穿透；分离=存在可见间隙；禁止“物体嵌入斜面/墙体/地面/轨道内部”。
+   - 力学位置约束：滑块/小车必须位于轨道或坡面表面；悬挂物必须在绳端下方；铰接点必须落在杆件端点或指定节点。
+   - 力学方向约束：重力始终竖直向下；支持力垂直于接触面；摩擦力沿接触面切向；弹力沿弹簧轴线。
+   - 力学连结约束：细绳只能拉不能推，受力沿绳方向；滑轮绳段连续，绳长约束与运动方向自洽。
+   - 力学受力标注：受力箭头起点必须在受力物体或接触点，不得悬空；同一力不可重复或遗漏关键作用线。
    - 电学：电路连接必须真实连通，端点对应正确；串并联关系、极性、开关状态与题意一致，禁止悬空断线。
    - 光学：光线传播、法线位置、反射/折射方向与成像位置必须符合物理规律。
    - 化学：结构式/键型/官能团/配位与题干或 SMILES 一致，实验装置连接顺序与流向合理。
    - 生物：结构层级与相对位置符合教材规范（膜内外、细胞器位置、流程方向）。
    - 地理：方向、图例、区域对应、风向/水流/等值线关系与地理事实一致。
-8. 先自检再输出：逐项核对元素、位置、连接、方向、标签；任何一项不满足先重绘，严禁带错输出。
+8. 比例与边界约束：对象尺寸、间距、角度比例应与题意一致；禁止标签互相遮挡关键元素；关键对象不得超出画布或被裁切。
+9. 先自检再输出：逐项核对元素、位置、连接、方向、标签、单位、物理规律；任何一项不满足先重绘，严禁带错输出。
 `;
+        }
+
+        function buildPhysicsAuditPrompt({ analysis, typeName, items }) {
+            const subject = sanitizeReadableText(analysis?.subject || "");
+            const knowledge = sanitizeReadableText(analysis?.knowledge_point || "");
+            const trap = sanitizeReadableText(analysis?.trap_analysis || "");
+            const summary = sanitizeReadableText(analysis?.problem_summary || "");
+            const graphicFacts = buildGraphicFactsHint(analysis);
+            const compactItems = (Array.isArray(items) ? items : []).map((item, index) => ({
+                index,
+                question: sanitizeReadableText(item?.question || ""),
+                svg: sanitizeSvgMarkup(item?.svg || "")
+            }));
+
+            return `
+你是“全学科题图物理一致性审计器 + SVG修复器”。
+任务：对每个题图进行真实世界一致性审计；若发现任何违规，必须修复为正确 SVG。
+
+背景：
+- 学科：${subject}
+- 类型：${sanitizeReadableText(typeName || "")}
+- 核心考点：${knowledge}
+- 易错陷阱：${trap}
+- 题干摘要：${summary || "（无）"}
+- ${graphicFacts}
+
+必须执行的强约束：
+${buildGraphicStrongConstraint()}
+
+关键审计点（必须逐题检查）：
+1. 接触关系：接触对象只能边界接触，严禁几何穿透（如滑块进入坡面内部）。
+2. 位置关系：上下/左右/内外/中间/邻接/相交/包含/平行/垂直与题干完全一致。
+3. 约束关系：滑块在轨道面上、绳子连续、支点固定、铰链在节点、回路真实连通。
+4. 方向关系：重力向下、法线垂面、摩擦切向、箭头方向与物理意义一致。
+5. 标注关系：标签、单位、下标、编号与题干一致，不遮挡关键结构。
+
+输入题目数组（JSON）：
+${JSON.stringify(compactItems)}
+
+输出格式（严格JSON，不要解释，不要Markdown）：
+{
+  "items": [
+    {
+      "index": 0,
+      "is_valid": true,
+      "violations": [],
+      "corrected_svg": "<svg ...>...</svg>"
+    }
+  ]
+}
+
+输出要求：
+1. 每个 index 都必须返回。
+2. 若 is_valid=false，必须在 violations 列出违规点，并给出修复后的 corrected_svg。
+3. 若 is_valid=true，也必须返回 corrected_svg（可与原图一致）。
+4. corrected_svg 必须是完整、可渲染、单个 <svg> 根节点。
+`;
+        }
+
+        async function enforcePhysicsConstraintsForItems({ analysis, typeName, items }) {
+            if (!analysis?.has_graphics) return Array.isArray(items) ? items : [];
+            if (!Array.isArray(items) || items.length === 0) return [];
+
+            const hasSvg = items.some((item) => sanitizeSvgMarkup(item?.svg || ""));
+            if (!hasSvg) return items;
+
+            try {
+                const auditPrompt = buildPhysicsAuditPrompt({ analysis, typeName, items });
+                const auditData = await getJsonWithRepair({
+                    model: MODEL_NAME,
+                    messages: [{ role: "user", content: auditPrompt }],
+                    response_format: { type: "json_object" },
+                    ...AI_REQUEST_OPTIONS
+                }, "items[{index,is_valid,violations[],corrected_svg}]");
+
+                const rows = Array.isArray(auditData?.items) ? auditData.items : [];
+                if (rows.length === 0) return items;
+
+                const rowMap = new Map();
+                rows.forEach((row) => {
+                    const index = Number(row?.index);
+                    if (!Number.isFinite(index) || index < 0) return;
+                    rowMap.set(index, row);
+                });
+
+                return items.map((item, index) => {
+                    const row = rowMap.get(index);
+                    if (!row) return item;
+                    const fixedSvg = sanitizeSvgMarkup(row?.corrected_svg || "");
+                    if (!fixedSvg) return item;
+                    return { ...item, svg: fixedSvg };
+                });
+            } catch (error) {
+                console.warn("物理一致性审计失败，保留原始图形：", error);
+                return items;
+            }
         }
 
         function buildVariationPrompt({ typeName, analysis, batchSize, existingQuestions = [], fillOnly = false }) {
@@ -1017,7 +1118,14 @@ ${analysis.has_graphics ? "每道题必须包含 svg 字段，值为可直接渲
                 items = items.concat(fillItems);
             }
 
-            return items.slice(0, batchSize);
+            items = items.slice(0, batchSize);
+            items = await enforcePhysicsConstraintsForItems({
+                analysis,
+                typeName,
+                items
+            });
+
+            return items;
         }
 
         function appendVariationItems(index, incomingItems) {
