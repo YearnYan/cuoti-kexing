@@ -21,6 +21,12 @@
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <!-- FontAwesome -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- SmilesDrawer - 化学分子结构渲染 -->
+    <script src="https://unpkg.com/smiles-drawer@2.1.8/dist/smiles-drawer.min.js" defer></script>
+    <!-- Mermaid - 流程图渲染 -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js" defer></script>
+    <!-- Chart.js - 地理气候图渲染 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4" defer></script>
     <!-- Google Fonts (Only for Logo) -->
     <link href="https://fonts.googleapis.com/css2?family=Zcool+XiaoWei&display=swap" rel="stylesheet">
 
@@ -409,6 +415,7 @@
             knowledge_point: "",
             trap_analysis: "",
             has_graphics: false,
+            graphics_type: null,
             problem_summary: "",
             sub_questions: []
         };
@@ -453,7 +460,7 @@
                     
                     <div class="math-content text-lg text-gray-800 leading-loose pl-11 mb-4">
                         ${item.question}
-                        ${item.svg ? `<div class="mt-4 p-4 bg-gray-50 border border-gray-100 rounded-lg flex justify-center">${item.svg}</div>` : ''}
+                        ${item.diagram ? `<div class="mt-4 p-4 bg-gray-50 border border-gray-100 rounded-lg flex justify-center diagram-container" data-diagram='${JSON.stringify(item.diagram).replace(/'/g, "&#39;")}'></div>` : (item.svg ? `<div class="mt-4 p-4 bg-gray-50 border border-gray-100 rounded-lg flex justify-center">${item.svg}</div>` : '')}
                     </div>
 
                     <div id="ans-${index}-${i}" class="hidden pl-11 mt-4 pt-4 border-t border-dashed border-gray-200 bg-gray-50/50 rounded-b-xl -mx-6 px-6 pb-4">
@@ -478,6 +485,8 @@
             `;
 
             MathJax.typeset();
+            // 渲染结构化图形
+            if (typeof renderAllDiagrams === 'function') renderAllDiagrams();
         }
 
         async function loadMore(index) {
@@ -501,11 +510,18 @@
                     batchIndex++;
                     btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> 生成中 (${allItems.length}/${10})...`;
 
+                    const diagramInstr = currentContext.has_graphics
+                        ? `图形要求：原题包含关键图形（类型：${currentContext.graphics_type || 'generic_svg'}），请为每道题生成 diagram 字段。
+**不要输出 SVG 代码**，只输出结构化 JSON 描述图形内容。diagram 字段示例：
+{${getDiagramSchemaExample(currentContext.graphics_type)}}
+请确保 diagram 中的数值与题目条件严格匹配。`
+                        : "原题无图形，不需要 diagram 字段。";
+
                     const prompt = `
 背景：用户正在针对"${currentSubject}"学科的"${currentContext.knowledge_point}"知识点进行专项训练。核心陷阱逻辑：${currentContext.trap_analysis}
 题干摘要：${currentContext.problem_summary || "（无）"}
 ${subQ}
-图形需求：${currentContext.has_graphics ? "原题包含关键图形，请为新生成的每一道题也设计并生成对应的SVG代码。" : "原题无图形，生成的题目不需要图形。"}
+${diagramInstr}
 
 任务：请生成 **${batchSize}题** 全新的《${typeName}》变式题。要求：
 1. 保持与原题难度和逻辑一致。
@@ -513,7 +529,6 @@ ${subQ}
 3. 如果是理科，请更换数字或场景；如果是文科，请更换素材或语境。
 4. **解析必须详尽**：包含解题步骤、逻辑推导和易错点提示。
 5. 允许每道题为"题干 + 多小问"的小题组，用（1）（2）（3）标注小问。
-6. ${currentContext.has_graphics ? "**必须生成SVG**：每道题必须包含一个匹配题目数值和条件的 svg 字段。SVG代码要简洁、准确，不包含 markdown 标记。" : ""}
 
 注意：JSON字符串中的反斜杠必须转义（例如：LaTeX 用双反斜杠）。**仅输出严格JSON**，不要输出任何解释或Markdown。输出格式（JSON）：
 {
@@ -521,8 +536,7 @@ ${subQ}
     {
       "question": "...",
       "answer": "...",
-      "solution": "第一步：... 第二步：... 核心逻辑：...",
-      ${currentContext.has_graphics ? '"svg": "<svg>...</svg>"' : ""}
+      "solution": "第一步：... 第二步：... 核心逻辑：..."${currentContext.has_graphics ? ',\n      "diagram": {...}' : ''}
     },
     ... (${batchSize}题)
   ]
@@ -534,7 +548,7 @@ ${subQ}
                         messages: [{ role: "user", content: prompt }],
                         response_format: { type: "json_object" },
                         ...AI_REQUEST_OPTIONS
-                    }, "items[{question,answer,solution,svg?}]");
+                    }, "items[{question,answer,solution,diagram?}]");
 
                     if (batchData.items && Array.isArray(batchData.items)) {
                         allItems.push(...batchData.items);
@@ -709,6 +723,7 @@ ${subQ}
                 knowledge_point,
                 trap_analysis,
                 has_graphics: Boolean(data.has_graphics),
+                graphics_type: data.graphics_type || null,
                 problem_summary: String(data.problem_summary || "").trim(),
                 sub_questions: Array.isArray(data.sub_questions) ? data.sub_questions : []
             };
@@ -721,10 +736,35 @@ ${subQ}
             return data.variations;
         }
 
+        function getDiagramSchemaExample(graphicsType) {
+            const schemas = {
+                geometry: `"diagram": {"type":"geometry","data":{"points":[{"id":"A","x":0,"y":0},{"id":"B","x":4,"y":0},{"id":"C","x":0,"y":3}],"segments":[["A","B"],["B","C"],["A","C"]],"angles":[{"vertex":"C","value":"90°","mark":true}],"labels":[{"text":"5","from":"A","to":"B"}],"circles":[],"auxiliary":[]}}`,
+                function_graph: `"diagram": {"type":"function_graph","data":{"xRange":[-5,5],"yRange":[-3,10],"gridStep":1,"functions":[{"expr":"x^2-2*x+1","color":"#2563eb","label":"y=x²-2x+1"}],"points":[{"x":1,"y":0,"label":"(1,0)","style":"hollow"}],"asymptotes":[]}}`,
+                coordinate: `"diagram": {"type":"coordinate","data":{"xRange":[-4,4],"yRange":[-4,4],"vectors":[{"from":[0,0],"to":[3,2],"label":"a⃗","color":"#2563eb"}],"points":[{"x":2,"y":3,"label":"P(2,3)"}],"lines":[]}}`,
+                force: `"diagram": {"type":"force","data":{"object":{"shape":"rect","label":"m"},"surface":{"type":"flat"},"forces":[{"direction":"down","label":"mg","magnitude":"large"},{"direction":"up","label":"N","magnitude":"large"},{"direction":"right","label":"F","magnitude":"medium"}],"annotations":[]}}`,
+                circuit: `"diagram": {"type":"circuit","data":{"components":[{"type":"battery","label":"E"},{"type":"resistor","label":"R₁"},{"type":"switch","label":"S"},{"type":"ammeter","label":"A"}]}}`,
+                optics: `"diagram": {"type":"optics","data":{"elements":[{"type":"convex_lens","position":0,"focalLength":10},{"type":"object","position":-15,"height":3}],"rays":true,"axisRange":[-30,30]}}`,
+                molecule: `"diagram": {"type":"molecule","data":{"smiles":"C1=CC=CC=C1","name":"苯"}}`,
+                reaction: `"diagram": {"type":"reaction","data":{"steps":[{"reactants":["CH₄","2O₂"],"products":["CO₂","2H₂O"],"conditions":["点燃"]}]}}`,
+                apparatus: `"diagram": {"type":"apparatus","data":{"equipment":[{"type":"flask","label":"圆底烧瓶","content":"稀盐酸"},{"type":"tube","label":"导管"},{"type":"beaker","label":"烧杯","content":"NaOH溶液"}]}}`,
+                cell: `"diagram": {"type":"cell","data":{"cellType":"animal","structures":["nucleus","mitochondria","cell_membrane","endoplasmic_reticulum"],"labels":true,"highlighted":["mitochondria"]}}`,
+                process_flow: `"diagram": {"type":"process_flow","data":{"nodes":[{"id":"1","text":"DNA","shape":"rect"},{"id":"2","text":"mRNA","shape":"rect"},{"id":"3","text":"蛋白质","shape":"rect"}],"edges":[{"from":"1","to":"2","label":"转录"},{"from":"2","to":"3","label":"翻译"}]}}`,
+                geographic: `"diagram": {"type":"geographic","data":{"subtype":"climate_chart","climate_chart":{"city":"北京","months":[1,2,3,4,5,6,7,8,9,10,11,12],"temperature":[-3.7,-0.7,6.4,14.2,20.1,24.7,26.2,24.9,19.9,12.8,4.2,-1.8],"precipitation":[2.6,5.2,8.3,21.2,33.3,78.1,185.2,159.7,45.5,21.8,7.4,2.8]}}}`
+            };
+            return schemas[graphicsType] || `"diagram": {"type":"generic_svg","data":{"description":"根据题意绘制的示意图","elements":[{"shape":"rect","x":50,"y":50,"width":100,"height":60,"label":"A"},{"shape":"arrow","from":[150,80],"to":[200,80]},{"shape":"circle","cx":250,"cy":80,"r":30,"label":"B"}]}}`;
+        }
+
         async function generateVariationItems(typeName, analysis) {
             const subQ = analysis.sub_questions?.length
                 ? `原题包含小问：${analysis.sub_questions.join("；")}`
                 : "原题为单问或未明确小问。";
+
+            const diagramInstruction = analysis.has_graphics
+                ? `图形要求：原题包含关键图形（类型：${analysis.graphics_type || 'generic_svg'}），请为每道题生成 diagram 字段。
+**不要输出 SVG 代码**，只输出结构化 JSON 描述图形内容。diagram 字段示例：
+{${getDiagramSchemaExample(analysis.graphics_type)}}
+请确保 diagram 中的数值与题目条件严格匹配。`
+                : "图形要求：原题无图形，不需要 diagram 字段。";
 
             const prompt = `
 请根据以下分析生成变式题（仅生成该类型，不要重复分析）：
@@ -733,16 +773,15 @@ ${subQ}
 易错陷阱：${analysis.trap_analysis}
 题干摘要：${analysis.problem_summary || "（无）"}
 ${subQ}
-图形要求：${analysis.has_graphics ? "需要SVG" : "不需要SVG"}
+${diagramInstruction}
 类型：${typeName}
 
-任务：严格生成 **5题** 《${typeName}》变式题。每道题允许为“题干 + 多小问”的小题组，用（1）（2）（3）标注小问。难度与原题一致。
-若需要图形：每道题必须包含 svg 字段，值为简洁准确的 SVG 代码（不要 Markdown）。
+任务：严格生成 **5题** 《${typeName}》变式题。每道题允许为"题干 + 多小问"的小题组，用（1）（2）（3）标注小问。难度与原题一致。
 注意：JSON字符串中的反斜杠必须转义（例如：LaTeX 用双反斜杠）。
 **仅输出严格JSON**，不要输出任何解释或Markdown。输出格式：
 {
   "items": [
-    { "question": "...", "answer": "...", "solution": "...", "svg": "..." },
+    { "question": "...", "answer": "...", "solution": "..."${analysis.has_graphics ? ', "diagram": {...}' : ''} },
     ... (5题)
   ]
 }
@@ -754,7 +793,7 @@ ${subQ}
                 messages: [{ role: "user", content: prompt }],
                 response_format: { type: "json_object" },
                 ...AI_REQUEST_OPTIONS
-            }, "items[{question,answer,solution,svg?}]");
+            }, "items[{question,answer,solution,diagram?}]");
 
             let items = Array.isArray(data.items) ? data.items : [];
             if (items.length < 5) {
@@ -766,12 +805,12 @@ ${subQ}
 易错陷阱：${analysis.trap_analysis}
 题干摘要：${analysis.problem_summary || "（无）"}
 ${subQ}
-图形要求：${analysis.has_graphics ? "需要SVG" : "不需要SVG"}
+${diagramInstruction}
 注意：JSON字符串中的反斜杠必须转义（例如：LaTeX 用双反斜杠）。
 **仅输出严格JSON**，不要输出任何解释或Markdown。输出格式：
 {
   "items": [
-    { "question": "...", "answer": "...", "solution": "...", "svg": "..." },
+    { "question": "...", "answer": "...", "solution": "..."${analysis.has_graphics ? ', "diagram": {...}' : ''} },
     ... (${missing}题)
   ]
 }
@@ -783,7 +822,7 @@ ${subQ}
                     messages: [{ role: "user", content: fillPrompt }],
                     response_format: { type: "json_object" },
                     ...AI_REQUEST_OPTIONS
-                }, "items[{question,answer,solution,svg?}]");
+                }, "items[{question,answer,solution,diagram?}]");
 
                 const fillItems = Array.isArray(fillData.items) ? fillData.items : [];
                 items = items.concat(fillItems).slice(0, 5);
@@ -831,12 +870,19 @@ ${subQ}
 你是一位K12全科金牌教研员。请**只做分析**，不要生成变式题。
 要求：如果题目包含多个小问，请拆分为 sub_questions 数组。problem_summary 用一句话概括题干与已知条件。
 判断是否需要图形：只有解题必须依赖题图/示意图时，has_graphics 才为 true。
+如果 has_graphics 为 true，请判断图形类型 graphics_type，取值范围：
+  geometry（几何图形）、function_graph（函数图像）、coordinate（坐标系/向量）、
+  force（力学图）、circuit（电路图）、optics（光学图）、
+  molecule（分子结构）、reaction（化学反应/方程式）、apparatus（实验装置）、
+  cell（细胞/生物结构）、process_flow（流程图）、geographic（地理图）。
+如果不需要图形，graphics_type 为 null。
 注意：JSON字符串中的反斜杠必须转义（例如：LaTeX 用双反斜杠）。**仅输出严格JSON**，不要输出任何解释或Markdown。输出格式：
 {
   "subject": "...",
   "knowledge_point": "...",
   "trap_analysis": "...",
   "has_graphics": true/false,
+  "graphics_type": "geometry|function_graph|...|null",
   "problem_summary": "...",
   "sub_questions": ["(1)...", "(2)..."]
 }
@@ -854,7 +900,7 @@ ${subQ}
                         }],
                         response_format: { type: "json_object" },
                         ...AI_REQUEST_OPTIONS
-                    }, "analysis:{subject,knowledge_point,trap_analysis,has_graphics,problem_summary,sub_questions[]}");
+                    }, "analysis:{subject,knowledge_point,trap_analysis,has_graphics,graphics_type,problem_summary,sub_questions[]}");
 
                     const analysis = normalizeAnalysis(analysisRaw);
 
@@ -870,6 +916,7 @@ ${subQ}
                         knowledge_point: analysis.knowledge_point,
                         trap_analysis: analysis.trap_analysis,
                         has_graphics: analysis.has_graphics,
+                        graphics_type: analysis.graphics_type,
                         problem_summary: analysis.problem_summary,
                         sub_questions: analysis.sub_questions,
                         variations
@@ -885,6 +932,7 @@ ${subQ}
                     knowledge_point: jsonResponse.knowledge_point,
                     trap_analysis: jsonResponse.trap_analysis,
                     has_graphics: jsonResponse.has_graphics || false,
+                    graphics_type: jsonResponse.graphics_type || null,
                     problem_summary: jsonResponse.problem_summary || "",
                     sub_questions: Array.isArray(jsonResponse.sub_questions) ? jsonResponse.sub_questions : []
                 };
@@ -995,23 +1043,23 @@ ${subQ}
                 `;
 
                 vType.items.forEach((item, i) => {
-                    const hasSvg = Boolean(item.svg);
+                    const hasFigure = Boolean(item.diagram || item.svg);
                     const questionHtml = formatQuestionForPrint(item.question);
                     const complexity = getSvgComplexity(item.svg);
                     html += `
-                        <div class="print-question avoid-break ${hasSvg ? '' : 'no-figure'}">
+                        <div class="print-question avoid-break ${hasFigure ? '' : 'no-figure'}">
                             <div class="print-q-row">
                                 <span class="print-q-number text-base">${i + 1}.</span>
                                 <div class="print-q-body">
                                     ${mode === 'question' ? `
                                         ${questionHtml}
-                                        <div class="print-answer-area ${hasSvg ? '' : 'no-figure'}">
+                                        <div class="print-answer-area ${hasFigure ? '' : 'no-figure'}">
                                             <div class="print-answer-left">
                                                 <div class="print-answer-lines"></div>
                                             </div>
-                                            ${hasSvg ? `
+                                            ${hasFigure ? `
                                                 <div class="print-answer-right">
-                                                    <div class="print-figure ${complexity === 'complex' ? 'is-complex' : ''}">${item.svg}</div>
+                                                    <div class="print-figure ${complexity === 'complex' ? 'is-complex' : ''} diagram-container" ${item.diagram ? `data-diagram='${JSON.stringify(item.diagram).replace(/'/g, "&#39;")}'` : ''}>${item.svg || ''}</div>
                                                 </div>
                                             ` : ''}
                                         </div>
@@ -1039,6 +1087,8 @@ ${subQ}
             } catch (e) {
                 console.warn('MathJax 渲染异常', e);
             }
+            // 渲染打印版图形
+            if (typeof renderAllDiagrams === 'function') renderAllDiagrams();
         }
 
         window.printQuestionVer = () => {
@@ -1127,6 +1177,8 @@ ${subQ}
             };
         }
     </script>
+    <!-- 图形渲染引擎 -->
+    <script src="diagram-renderer.js"></script>
     <script src="../common/nav.js"></script>
 </body>
 
